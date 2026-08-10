@@ -342,7 +342,7 @@ static int cmp_far_first(const void *a, const void *b) {
 
 void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                  const WPhys *p, const uint8_t *cars_px, int player_kart,
-                 const WAi *ai, const WWeapons *weap) {
+                 WAi *ai, const WWeapons *weap) {
     DrawEnt list[MAX_INST + 8];
     int n = 0;
 
@@ -393,6 +393,7 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 /* spinning karts cycle their own 8 rotation frames;
                  * viewTable seed K=6 gives the rear view for same-heading */
                 int frame = (mode == 1) ? hitframe : ((compass - cam_oct + 6) & 7);
+                if (mode == 0) wai_set_view_frame(ai, k, frame);
                 e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
             }
             list[n++] = e;

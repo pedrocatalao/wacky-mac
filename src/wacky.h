@@ -152,6 +152,8 @@ typedef struct {
     int     drift;           /* 0 / 1 left / 2 right                          */
     int     drift_timer;
     int     spin_dir, spin_step;
+    int     spin_frame;      /* index into the 17-entry spin table: 7->0 left,
+                                9->0x10 right; rotation frame = (4+i) & 7    */
     int     hop_turn_dir, hop_turn_cnt;   /* handbrake sharp turn             */
     int     hop_state, hop_air, hop_height, hop_maxh;  /* ramp jumps          */
     int     turbo, turbo_timer;
@@ -200,7 +202,8 @@ int  wai_hit_kart(void *ctx, int x, int y);
 int  wai_kart_at(void *ctx, int x, int y);
 void wai_kart_hit(void *ctx, int idx, int spin_state, int tick);
 void wai_kart_ram(WAi *ai, int idx);
-int  wai_kart_render(const WAi *ai, int i, int *x, int *y, int *compass, int *frame);
+int  wai_kart_render(WAi *ai, int i, int *x, int *y, int *compass, int *frame);
+void wai_set_view_frame(WAi *ai, int i, int frame);
 
 /* ---- Weapons / projectiles (src/weapons.c) ---- */
 
@@ -226,7 +229,7 @@ int     wscene_blocks(void *ctx, int x, int y);
 void    wscene_resolve_pickups(WScene *s, WPhys *p);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
-                    const WAi *ai, const WWeapons *weap);
+                    WAi *ai, const WWeapons *weap);
 
 /* ---- Sprites (.SP raw transposed frames) ---- */
 

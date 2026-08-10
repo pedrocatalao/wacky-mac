@@ -363,10 +363,16 @@ int main(int argc, char **argv) {
                  * 0,1 = char lean-left pair, 2 = CARS rear view,
                  * 3,4 = char lean-right pair; steps 1 frame/tick */
                 const uint8_t *kf;
-                if (steer_anim == 2 || !char_raw[kart_id])
+                if (player.spin_dir && cars_raw) {
+                    /* spin-out: the 17-entry spin table cycles the kart's own
+                     * rotation frames starting at 4 (built at character select,
+                     * FUN_00016ca0 region) */
+                    int rot = (4 + player.spin_frame) & 7;
+                    kf = cars_raw + ((size_t)kart_id * 12 + rot) * KART_W * KART_H;
+                } else if (steer_anim == 2 || !char_raw[kart_id]) {
                     kf = cars_raw ? cars_raw + ((size_t)kart_id * 12 + 4) * KART_W * KART_H
                                   : NULL;
-                else {
+                } else {
                     int extra = steer_anim < 2 ? steer_anim : steer_anim - 1;
                     kf = char_raw[kart_id] + (size_t)extra * KART_W * KART_H;
                 }

@@ -283,6 +283,7 @@ void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
             if (struck_player && player && player->spin_dir == 0) {
                 player->spin_dir = 1;
                 player->spin_step = 0;
+                player->spin_frame = 7;
                 player->drift = 0;
                 player->hold_l = player->hold_r = 0;
             }

@@ -37,6 +37,7 @@ struct WAi {
         int32_t progress;
         int spin_state, hit_tick;   /* 1 = spin (0x21 ticks), 2 = squash (0x32) */
         int spin_frame;             /* rotation frame cycled while spinning    */
+        int view_frame;             /* last frame drawn; spins start from it   */
         int hit_flag, squash_frame; /* 2 = rammed/destroyed, 4-frame squash    */
     } k[8];
 
@@ -288,6 +289,8 @@ void wai_kart_hit(void *ctx, int idx, int spin_state, int tick) {
     if (ai->k[idx].spin_state) return;
     ai->k[idx].spin_state = spin_state;
     ai->k[idx].hit_tick = 0;
+    ai->k[idx].spin_frame = ai->k[idx].view_frame;   /* start from the frame
+                                                        currently on screen */
 }
 
 /* collision probe: index+1 of an AI kart within Manhattan 0xE of (x,y) */
@@ -312,11 +315,16 @@ void wai_kart_ram(WAi *ai, int idx) {
     ai->k[idx].spin_state = 0;
 }
 
+/* remember the frame the renderer chose, so a spin starts from it */
+void wai_set_view_frame(WAi *ai, int i, int frame) {
+    if (ai && i >= 1 && i <= 7) ai->k[i].view_frame = frame;
+}
+
 /* render state: 0 normal (use compass), 1 spinning (frame = rotation frame),
  * 2 squashed (frame = squash frame 0..3), 3 hidden */
-int wai_kart_render(const WAi *ai, int i, int *x, int *y, int *compass, int *frame) {
+int wai_kart_render(WAi *ai, int i, int *x, int *y, int *compass, int *frame) {
     if (!ai || i < 1 || i > 7) return 3;
-    const struct AiKart *k = &ai->k[i];
+    struct AiKart *k = &ai->k[i];
     *x = k->x;
     *y = k->y;
     *compass = k->compass;

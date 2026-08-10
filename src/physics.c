@@ -261,7 +261,7 @@ static void player_steer(const PhysCtx *c, WPhys *p, int steer_rate,
                 if (p->grip != 0) return;
                 /* zero grip: instant spin right */
                 p->drift = 0; p->steer_r = 0; p->spin_dir = 2;
-                p->spin_step = 0;
+                p->spin_step = 0; p->spin_frame = 9;
             } else {
                 /* left drift trigger */
                 p->steer_l = p->steer_r = 0;
@@ -271,7 +271,7 @@ static void player_steer(const PhysCtx *c, WPhys *p, int steer_rate,
                 p->hold_l = p->hold_r = 0;
                 if (p->grip != 0) return;
                 p->drift = 0; p->steer_r = 0; p->spin_dir = 1;
-                p->spin_step = 0;
+                p->spin_step = 0; p->spin_frame = 7;
             }
             return;
         }
@@ -295,11 +295,11 @@ static void player_steer(const PhysCtx *c, WPhys *p, int steer_rate,
         }
         if (p->drift == 1) {
             if (release <= p->hold_l) {          /* held too long: spin out */
-                p->drift = 0; p->spin_dir = 1; p->spin_step = 0;
+                p->drift = 0; p->spin_dir = 1; p->spin_step = 0; p->spin_frame = 7;
                 p->steer_l = SPIN_RATE;
             }
         } else if (release <= p->hold_r) {
-            p->drift = 0; p->spin_dir = 2; p->spin_step = 0;
+            p->drift = 0; p->spin_dir = 2; p->spin_step = 0; p->spin_frame = 9;
             p->steer_r = SPIN_RATE;
         }
         p->drift_timer -= 10;
@@ -317,10 +317,10 @@ static void player_steer(const PhysCtx *c, WPhys *p, int steer_rate,
     p->steer_l = 0; p->steer_r = 0;
     if (p->spin_dir == 1) {
         p->steer_l = SPIN_RATE;
-        if (++p->spin_step > 8) goto spin_done;
+        if (--p->spin_frame < 0) goto spin_done;
     } else {
         p->steer_r = SPIN_RATE;
-        if (++p->spin_step > 8) goto spin_done;
+        if (++p->spin_frame > 0x10) goto spin_done;
     }
     decay_speed(p);
     if (p->speed < 1) goto spin_done;
