@@ -156,6 +156,9 @@ typedef struct {
     int     hop_state, hop_air, hop_height, hop_maxh;  /* ramp jumps          */
     int     turbo, turbo_timer;
     int     engine_state, engine_anim;   /* kart +0x62 / +0x54: exhaust anim */
+    int     weapon_id;       /* 0 default hedgehog, 3..8 special (see docs)  */
+    int     ammo;            /* hedgehog count, cap 99                        */
+    int     fire_latch, last_fire_tick;
     int     in_water, splash;
     int     collide;         /* 0 none, 1 wall, 2 object, 3 kart, 4 ramp-hop  */
     int     object_hit;
@@ -191,6 +194,23 @@ void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_ra
 void wai_progress(WAi *ai, const WTrack *t);
 void wai_kart_state(const WAi *ai, int i, int *x, int *y, int *compass);
 int  wai_hit_kart(void *ctx, int x, int y);
+/* projectile probes: kart within Manhattan 0x12, and the hit reaction
+ * (spin_state 1 = spin 0x21 ticks, 2 = squash 0x32 ticks) */
+int  wai_kart_at(void *ctx, int x, int y);
+void wai_kart_hit(void *ctx, int idx, int spin_state, int tick);
+
+/* ---- Weapons / projectiles (src/weapons.c) ---- */
+
+typedef struct WWeapons WWeapons;
+WWeapons *wweap_create(const WDat *dat);
+void wweap_free(WWeapons *w);
+void wweap_reset(WWeapons *w);
+void wweap_fire(WWeapons *w, WPhys *p, const WTrack *t, const WTables *tb,
+                bool fire_btn, int tick, int *sound_out);
+void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
+                const WCollide *col, int shooter_angle, int tick);
+int  wweap_enum(const WWeapons *w, int i, int *x, int *y, const uint8_t **sprite);
+int  wweap_count(void);
 
 /* ---- World scene: objects (.SPW/SPRITE.ATR) + kart billboards ---- */
 
@@ -199,9 +219,10 @@ WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum);
 void    wscene_free(WScene *s);
 void    wscene_tick(WScene *s);
 int     wscene_hit_object(void *ctx, int x, int y);
+void    wscene_resolve_pickups(WScene *s, WPhys *p);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
-                    const WAi *ai);
+                    const WAi *ai, const WWeapons *weap);
 
 /* ---- Sprites (.SP raw transposed frames) ---- */
 

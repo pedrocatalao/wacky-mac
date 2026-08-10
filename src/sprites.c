@@ -124,8 +124,9 @@ WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum) {
         s->ntypes = n;
     }
 
-    /* karts scale via 38X28.INF */
+    /* karts scale via 38X28.INF, projectiles via 18X13.INF */
     inf_for_dims(s, dat, 38, 28);
+    inf_for_dims(s, dat, 18, 13);
 
     /* .SPW: u16 count, then 6 x s16 {type, anim, x, y, ?, frame}; +0x400 */
     char name[16];
@@ -173,8 +174,9 @@ void wscene_free(WScene *s) {
     free(s);
 }
 
-/* collision probe: any live object within Manhattan 0xE of (x,y).
- * Marks the object hit (state 1) exactly as probe_step does. */
+/* collision probe: any live object within Manhattan 0xE of (x,y). Marks it
+ * touched (state 1); only SOLID scenery (behavior <= 0) blocks movement —
+ * pickups are resolved after the tick by wscene_resolve_pickups. */
 int wscene_hit_object(void *ctx, int x, int y) {
     WScene *s = ctx;
     if (!s) return 0;
@@ -186,10 +188,35 @@ int wscene_hit_object(void *ctx, int x, int y) {
         if (dy < 0) dy = -dy;
         if (dx + dy < 0xE) {
             in->anim = 1;
-            return 1;
+            return s->types[in->type].behavior <= 0;
         }
     }
     return 0;
+}
+
+/* SPRITE.ATR behavior: <=0 solid, 1 trigger, 2 ammo crate (+4, cap 99),
+ * 3..8 weapon pickup (ignored while a weapon is already held).
+ * Taken objects stay hidden until the race restarts. */
+void wscene_resolve_pickups(WScene *s, WPhys *p) {
+    if (!s) return;
+    for (int i = 0; i < s->ninst; i++) {
+        ObjInst *in = &s->inst[i];
+        if (in->anim != 1) continue;
+        int behavior = s->types[in->type].behavior;
+        if (behavior == 1) {
+            in->anim = -1;
+        } else if (behavior >= 2 && p->ammo < 99) {
+            if (p->weapon_id == 0 || behavior == 2) {
+                in->anim = -1;
+                if (behavior == 2) {
+                    p->ammo += 4;
+                    if (p->ammo > 99) p->ammo = 99;
+                } else {
+                    p->weapon_id = behavior;
+                }
+            }
+        }
+    }
 }
 
 /* ---- per-tick object animation (FUN_000261fc) ---- */
@@ -224,9 +251,11 @@ static uint32_t isqrt32(uint32_t v) {
     return r;
 }
 
-/* project one world sprite; returns false if culled */
-static bool project(const WTables *tb, const WPhys *p,
-                    int wx, int wy, DrawEnt *e) {
+/* project one world sprite; returns false if culled.
+ * bucket_base is 0x7C for karts/objects, 0x3E for projectiles (they render
+ * one size step larger at the same distance). */
+static bool project_b(const WTables *tb, const WPhys *p,
+                      int wx, int wy, DrawEnt *e, int bucket_base) {
     int32_t dx = wx - p->posx, dy = wy - p->posy;
     int32_t cq = tb->cosq[p->angle], sq = tb->sinq[p->angle];
     int32_t z = (cq * dx + sq * dy) >> 16;
@@ -241,13 +270,18 @@ static bool project(const WTables *tb, const WPhys *p,
     dist = (uint32_t)(d2 >> 14);
     if ((d2 & 0x3FFF) > 0x1F9F) dist++;
     if (dist < 0x50 || dist > 0x462) return false;
-    int bucket = ((int)dist - 0x7C) / 0x46;
+    int bucket = ((int)dist - bucket_base) / 0x46;
     if (bucket < 0) bucket = 0;
     if (bucket > 9) bucket = 9;
     e->dist = (int32_t)dist;
     e->sx = sx;
     e->bucket = bucket;
     return true;
+}
+
+static bool project(const WTables *tb, const WPhys *p,
+                    int wx, int wy, DrawEnt *e) {
+    return project_b(tb, p, wx, wy, e, 0x7C);
 }
 
 static void draw_scaled(uint32_t *fb, const uint8_t dac[768], const DrawEnt *e,
@@ -283,7 +317,7 @@ static int cmp_far_first(const void *a, const void *b) {
 
 void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                  const WPhys *p, const uint8_t *cars_px, int player_kart,
-                 const WAi *ai) {
+                 const WAi *ai, const WWeapons *weap) {
     DrawEnt list[MAX_INST + 8];
     int n = 0;
 
@@ -329,6 +363,28 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
             e.src_w = 38;
             e.src_h = 28;
             e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
+            list[n++] = e;
+        }
+    }
+
+    /* projectiles: 18x13 frames, scale bucket base 0x3E (FUN_0002632c) */
+    if (weap) {
+        const Inf *pinf = NULL;
+        for (int i = 0; i < s->ninf; i++)
+            if (s->inf[i].nrec && s->inf[i].rec[0].w == 18 && s->inf[i].rec[0].h == 13)
+                pinf = &s->inf[i];
+        int total = wweap_count();
+        for (int i = 0; i < total && n < MAX_INST + 8; i++) {
+            int px, py;
+            const uint8_t *sprite;
+            if (!wweap_enum(weap, i, &px, &py, &sprite)) continue;
+            DrawEnt e;
+            if (!project_b(tb, p, px, py, &e, 0x3E)) continue;
+            if (!pinf) continue;
+            e.inf = pinf;
+            e.src_w = 18;
+            e.src_h = 13;
+            e.frame = sprite;
             list[n++] = e;
         }
     }

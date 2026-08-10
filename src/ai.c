@@ -35,6 +35,7 @@ struct WAi {
         int x, y, compass;
         int lap, prev_cell;
         int32_t progress;
+        int spin_state, hit_tick;   /* 1 = spin (0x21 ticks), 2 = squash (0x32) */
     } k[8];
 
     int top_idx;                  /* aiTopSpeedIdx */
@@ -160,6 +161,15 @@ void wai_reset(WAi *ai, const WTrack *t, int class_id, int engine12,
 void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_rank) {
     for (int i = 1; i < 8; i++) {
         struct AiKart *k = &ai->k[i];
+        /* hit karts stand still until the spin/squash animation ends
+         * (FUN_000289ec: 0x21 ticks spinning, 0x32 squashed) */
+        if (k->spin_state) {
+            if (++k->hit_tick >= (k->spin_state == 1 ? 0x21 : 0x32)) {
+                k->spin_state = 0;
+                k->hit_tick = 0;
+            }
+            continue;
+        }
         int steps;
         switch (k->phase) {
         case 0:
@@ -245,6 +255,29 @@ void wai_progress(WAi *ai, const WTrack *t) {
         if (cell) k->prev_cell = cell;
         k->progress = (int32_t)k->lap * t->pos_max + cell;
     }
+}
+
+/* projectile probe: index of an AI kart within Manhattan 0x12, else -1 */
+int wai_kart_at(void *ctx, int x, int y) {
+    const WAi *ai = ctx;
+    if (!ai) return -1;
+    for (int i = 1; i < 8; i++) {
+        if (ai->k[i].spin_state) continue;
+        int dx = ai->k[i].x - x, dy = ai->k[i].y - y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        if (dx + dy < 0x12) return i;
+    }
+    return -1;
+}
+
+void wai_kart_hit(void *ctx, int idx, int spin_state, int tick) {
+    WAi *ai = ctx;
+    (void)tick;
+    if (!ai || idx < 1 || idx > 7) return;
+    if (ai->k[idx].spin_state) return;
+    ai->k[idx].spin_state = spin_state;
+    ai->k[idx].hit_tick = 0;
 }
 
 /* collision probe: any AI kart within Manhattan 0xE of (x,y) */

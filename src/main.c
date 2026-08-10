@@ -3,8 +3,8 @@
  * Algorithms and constants lifted from WW.EXE disassembly — see docs/.
  *   openwacky [path/to/WACKY.DAT] [track#]
  *
- * Controls: arrows drive, X hop/handbrake, N/P track, C kart, M debug map,
- *           R reset, ESC quit.
+ * Controls: arrows drive, X hop/handbrake, SPACE/Z fire, N/P track, C kart,
+ *           M debug map, R reset, ESC quit.
  */
 #include <SDL.h>
 #include <math.h>
@@ -180,6 +180,7 @@ int main(int argc, char **argv) {
     WSprite cars = {0};
     WScene *scene = NULL;
     WAi *ai = NULL;
+    WWeapons *weap = wweap_create(&dat);
     const uint8_t *cars_raw = wdat_find(&dat, "CARS.SP", NULL);
     /* per-character sprite files: lean frames [0..1] left, [2..3] right */
     static const char *char_names[8] = {
@@ -219,7 +220,9 @@ int main(int argc, char **argv) {
             wai_free(ai);
             ai = wai_load(&dat, &track, tracknum);
             if (ai) wai_reset(ai, &track, 1, 1, &TB);
+            if (weap) wweap_reset(weap);
             wphys_reset(&player, &track);
+            player.ammo = 4;     /* the original starts you with hedgehogs */
             /* headless pre-simulation for frame dumps: argv[4] = tick count */
             if (dump_path && argc > 4) {
                 int pre = atoi(argv[4]);
@@ -230,16 +233,15 @@ int main(int argc, char **argv) {
                 WCollide pcol = { wscene_hit_object, wai_hit_kart, scene, ai };
                 for (int i = 0; i < pre; i++) {
                     wphys_tick(&player, &track, &TB, &in, 1, &pcol);
+                    if (weap) {   /* fire once, then let it fly */
+                        wweap_fire(weap, &player, &track, &TB, i == 0, i, NULL);
+                        wweap_tick(weap, &track, &TB, &pcol, player.angle, i);
+                    }
                     if (scene) wscene_tick(scene);
                     if (ai) {
                         wai_tick(ai, &TB, 0, 1);
                         wai_progress(ai, &track);
                     }
-                }
-                for (int k = 1; ai && k < 8; k++) {
-                    int kx, ky, comp;
-                    wai_kart_state(ai, k, &kx, &ky, &comp);
-                    fprintf(stderr, "  kart %d at (%d,%d) compass %d\n", k, kx, ky, comp);
                 }
             }
             cyc_cnt60 = track.cycle_on ? 1 : 0;   /* GAM line 25 seeds counter */
@@ -275,12 +277,18 @@ int main(int argc, char **argv) {
         bool brake = keys[SDL_SCANCODE_DOWN];
         bool left = keys[SDL_SCANCODE_LEFT], right = keys[SDL_SCANCODE_RIGHT];
         bool hop = keys[SDL_SCANCODE_X];
+        bool fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_Z];
 
         bool ticked = false;
         while (acc_ms >= TICK_MS) {          /* authentic 11.34 Hz fixed step */
             WPhysInput in = { accel, brake, left, right, hop };
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
             wphys_tick(&player, &track, &TB, &in, 1, &col);
+            wscene_resolve_pickups(scene, &player);
+            if (weap) {
+                wweap_fire(weap, &player, &track, &TB, fire, tick_no, NULL);
+                wweap_tick(weap, &track, &TB, &col, player.angle, tick_no);
+            }
             /* steering-lean animation: step toward target 1 frame/tick */
             {
                 int target = left ? 0 : right ? 4 : 2;
@@ -338,7 +346,7 @@ int main(int argc, char **argv) {
                 render_view(&track, &player, left, right);
                 if (scene)
                     wscene_draw(fb, scene, &track, &TB, &player, cars_raw,
-                                kart_id, ai);
+                                kart_id, ai, weap);
                 /* 5-position steering animation (SPR_IDLE, anim state 5):
                  * 0,1 = char lean-left pair, 2 = CARS rear view,
                  * 3,4 = char lean-right pair; steps 1 frame/tick */

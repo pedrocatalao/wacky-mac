@@ -22,6 +22,7 @@ add_executable(openwacky
     src/ai.c
     src/physics.c
     src/sprites.c
+    src/weapons.c
     src/wdat.c
     src/wpcx.c
     src/track.c)
