@@ -169,6 +169,17 @@ static void walk_path(const PhysCtx *c, WPhys *p,
     if (!p->collide) probe_step(c, p, p->posx, p->posy, nx, ny);
 }
 
+/* rotate about the point ndist[0] ahead, keeping it fixed (the steering
+ * pivot, also used by the race-start camera swing) */
+void wphys_pivot_turn(WPhys *p, const WTables *tb, int amount, int dir) {
+    int32_t r = tb->ndist[0];
+    int32_t px = tscale(tb->cosq[p->angle], r);
+    int32_t py = tscale(tb->sinq[p->angle], r);
+    p->angle = wrapa(dir > 0 ? p->angle + amount : p->angle - amount);
+    p->posx += px - tscale(tb->cosq[p->angle], r);
+    p->posy += py - tscale(tb->sinq[p->angle], r);
+}
+
 static void steer_pivot(const PhysCtx *c, WPhys *p, int amount, int dir) {
     /* pivot = pos + vec(angle, ndist[0]); rotate; pos += pivot_old - pivot_new */
     int32_t r = c->tb->ndist[0];

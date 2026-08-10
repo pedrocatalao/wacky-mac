@@ -46,6 +46,8 @@ struct WScene {
     int      ninf;
     int16_t  rowtab[0x1000];    /* dist -> screen ground row */
     const uint8_t *squash;      /* GENEF.SP + 0x1DD9: 4 frames of 38x28 */
+    const uint8_t *light;       /* GENEF.SP + 0x1161: start light, 3 frames */
+    int      light_x, light_y, light_frame, light_on;
     /* other karts (static grid until AI lands) */
     int      kart_x[8], kart_y[8], kart_angle[8];
 };
@@ -134,7 +136,12 @@ WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum) {
         uint32_t glen;
         const uint8_t *g = wdat_find(dat, "GENEF.SP", &glen);
         if (g && glen > 0x1DD9 + 4 * 0x428) s->squash = g + 0x1DD9;
+        if (g && glen > 0x1161 + 3 * 0x428) s->light = g + 0x1161;
     }
+    /* start light sits beside pole position (race init: x+0x28, y-10) */
+    s->light_x = t->start_x[0] + 0x28;
+    s->light_y = t->start_y[0] - 10;
+    s->light_on = 1;
 
     /* .SPW: u16 count, then 6 x s16 {type, anim, x, y, ?, frame}; +0x400 */
     char name[16];
@@ -207,6 +214,13 @@ int wscene_hit_object(void *ctx, int x, int y, int *ox, int *oy) {
 /* read-only probe used by projectiles: any live object within Manhattan 0xE.
  * Unlike the kart probe this does NOT mark the object as touched, so a
  * projectile flying past a crate cannot collect it (ProjProbe @13022). */
+/* start-light state (0/1 = red/amber, 2 = burst; off once the race is live) */
+void wscene_set_light(WScene *s, int frame, int on) {
+    if (!s) return;
+    s->light_frame = frame;
+    s->light_on = on;
+}
+
 int wscene_blocks(void *ctx, int x, int y) {
     const WScene *s = ctx;
     if (!s) return 0;
@@ -398,6 +412,18 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 if (mode == 0) wai_set_view_frame(ai, k, frame);
                 e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
             }
+            list[n++] = e;
+        }
+    }
+
+    /* start light: a plain world sprite in the display list (FUN_000266a8) */
+    if (s->light && s->light_on && kart_inf) {
+        DrawEnt e;
+        if (project(tb, p, s->light_x, s->light_y, &e)) {
+            e.inf = kart_inf;
+            e.src_w = 38;
+            e.src_h = 28;
+            e.frame = s->light + (size_t)s->light_frame * 0x428;
             list[n++] = e;
         }
     }

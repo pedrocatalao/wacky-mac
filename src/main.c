@@ -200,6 +200,12 @@ int main(int argc, char **argv) {
     WPhys player;
     int cyc_cnt60 = 0, cyc_cnt50 = 0, cyc_ph_a = 0, cyc_ph_b = 0;
     int lap = 1, prev_prog = 0, wrong_way = 0;
+    /* race start (FUN_0002fd8c @23157): the camera is parked far to the side
+     * facing 0x3C0, slides in 0x40/frame, then swings round to 0x1E0 at
+     * 0x28/frame about the steering pivot; then the light counts down */
+    enum { START_SLIDE, START_SWING, START_LIGHT, RACING } phase = START_SLIDE;
+    int32_t start_x = 0, start_y = 0;
+    int light_tick = 0;
     int kart_id = 0;
     bool map_view = false;
     bool need_load = true, running = true;
@@ -225,6 +231,15 @@ int main(int argc, char **argv) {
             if (weap) wweap_reset(weap);
             wphys_reset(&player, &track);
             player.ammo = 4;     /* the original starts you with hedgehogs */
+            /* arm the intro fly-by */
+            start_x = player.posx + 0x84;
+            start_y = player.posy;
+            player.posy += 0x84;
+            player.posx = 0x708;
+            player.angle = 0x3C0;
+            phase = START_SLIDE;
+            light_tick = 0;
+            if (scene) wscene_set_light(scene, 0, 1);
             /* headless pre-simulation for frame dumps: argv[4] = tick count */
             if (dump_path && argc > 4) {
                 int pre = atoi(argv[4]);
@@ -283,6 +298,40 @@ int main(int argc, char **argv) {
 
         bool ticked = false;
         while (acc_ms >= TICK_MS) {          /* authentic 11.34 Hz fixed step */
+            /* race-start sequence: physics is frozen until the light bursts */
+            if (phase != RACING) {
+                switch (phase) {
+                case START_SLIDE:
+                    player.posx -= 0x40;
+                    if (player.posx <= start_x) {
+                        player.posx = start_x;
+                        phase = START_SWING;
+                    }
+                    break;
+                case START_SWING:
+                    wphys_pivot_turn(&player, &TB, 0x28, -1);
+                    if (player.angle < 0x1E1) {
+                        player.posx = start_x - 0x84;
+                        player.posy = start_y;
+                        player.angle = 0x1E0;
+                        phase = START_LIGHT;
+                    }
+                    break;
+                default:                       /* START_LIGHT */
+                    light_tick++;
+                    if (light_tick >= 0x22) {
+                        if (scene) wscene_set_light(scene, 2, 1);   /* burst */
+                        phase = RACING;
+                    } else if (scene) {
+                        wscene_set_light(scene, light_tick > 0x10 ? 1 : 0, 1);
+                    }
+                    break;
+                }
+                acc_ms -= TICK_MS;
+                ticked = true;
+                continue;
+            }
+
             WPhysInput in = { accel, brake, left, right, hop };
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
             wphys_tick(&player, &track, &TB, &in, 1, &col);
