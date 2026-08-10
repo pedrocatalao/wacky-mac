@@ -166,6 +166,9 @@ typedef struct {
     int     collide_kart;    /* index of the kart hit when collide == 3       */
     int     object_hit;
     int     skid, scraping;
+    /* scrape sparks: state 3 = left edge, 4 = right edge (+0x1E); 4 frames
+     * of 10x9 from SPARK.SP, one per tick (kart +0x46/+0x48) */
+    int     scrape_state, scrape_cnt;
     /* pending bump deflection (FUN_0002d3fc): set on contact, applied on the
      * next tick — rotate 0x12 away from the hit side, nudge 1 unit forward,
      * and (kart hits only) throttle +/- 0x28 by relative position */

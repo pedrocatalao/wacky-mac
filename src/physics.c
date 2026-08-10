@@ -74,12 +74,14 @@ static void whisker_respond(const PhysCtx *c, WPhys *p) {
     int hitL, hitR;
     whisker_check(c, p, &hitL, &hitR);
     if (hitL) {
+        if (p->scrape_state == 0) { p->scrape_state = 4; p->scrape_cnt = 0; }
         p->angle = wrapa(p->angle - WHISK);
         p->posx += tscale(c->tb->cosq[p->angle], 1);
         p->posy += tscale(c->tb->sinq[p->angle], 1);
         p->scraping = 1;
     }
     if (hitR) {
+        if (p->scrape_state == 0) { p->scrape_state = 3; p->scrape_cnt = 0; }
         p->angle = wrapa(p->angle + WHISK);
         p->posx += tscale(c->tb->cosq[p->angle], 1);
         p->posy += tscale(c->tb->sinq[p->angle], 1);
@@ -202,6 +204,9 @@ static void player_move(const PhysCtx *c, WPhys *p) {
         if (p->drift)    { p->drift = 0;    p->throttle = 0; }
         if (p->spin_dir) { p->spin_dir = 0; p->throttle = 0; }
         p->scraping = 1;
+        /* sparks on the side that was hit: horzRel 5 -> right, else left */
+        p->scrape_state = p->bump_horz == 5 ? 4 : 3;
+        p->scrape_cnt = 0;
     }
 
     if (p->collide == 1) {
@@ -386,6 +391,15 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
             }
         }
         p->bump_pending = 0;
+    }
+
+    /* scrape spark animation: one frame per tick, 4 frames then done
+     * (tail of FUN_00028998) */
+    if (p->scrape_state) {
+        if (++p->scrape_cnt >= 4) {
+            p->scrape_state = 0;
+            p->scrape_cnt = 0;
+        }
     }
 
     p->steer_l = 0; p->steer_r = 0;

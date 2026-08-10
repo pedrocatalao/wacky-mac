@@ -194,6 +194,8 @@ int main(int argc, char **argv) {
     /* exhaust sprite sets live inside HOGMIS.SP: +0xA0E idle, +0xDB6 accel,
      * +0x115E turbo; 18x13 frames of 0xEA bytes */
     const uint8_t *hogmis = wdat_find(&dat, "HOGMIS.SP", NULL);
+    /* collision sparks: 4 frames of 10x9 */
+    const uint8_t *spark = wdat_find(&dat, "SPARK.SP", NULL);
     int tick_no = 0;
     WPhys player;
     int cyc_cnt60 = 0, cyc_cnt50 = 0, cyc_ph_a = 0, cyc_ph_b = 0;
@@ -416,6 +418,15 @@ int main(int argc, char **argv) {
                         draw_effect(f, track.dac, 0x12, 0xD, dx0 + 5, dy0 + 0xB);
                         draw_effect(f, track.dac, 0x12, 0xD, dx0 + 5 + 0xB, dy0 + 0xB);
                     }
+                }
+
+                /* collision sparks (kart draw, scrapeState branch): 10x9 at
+                 * the kart's left edge (state 3) or right edge +0x1E (4),
+                 * displayY + 0x10 */
+                if (spark && player.scrape_state) {
+                    int sx = player.scrape_state == 3 ? dx0 : dx0 + 0x1E;
+                    draw_effect(spark + (size_t)player.scrape_cnt * 0x5A,
+                                track.dac, 10, 9, sx, dy0 + 0x10);
                 }
 
                 /* tire dust (per-surface, descriptor B): two copies at the rear
