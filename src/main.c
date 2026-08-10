@@ -235,7 +235,7 @@ int main(int argc, char **argv) {
                     wphys_tick(&player, &track, &TB, &in, 1, &pcol);
                     if (weap) {   /* fire once, then let it fly */
                         wweap_fire(weap, &player, &track, &TB, i == 0, i, NULL);
-                        wweap_tick(weap, &track, &TB, &pcol, player.angle, i);
+                        wweap_tick(weap, &track, &TB, &pcol, &player, i);
                     }
                     if (scene) wscene_tick(scene);
                     if (ai) {
@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
             player.collide = 0;
             if (weap) {
                 wweap_fire(weap, &player, &track, &TB, fire, tick_no, NULL);
-                wweap_tick(weap, &track, &TB, &col, player.angle, tick_no);
+                wweap_tick(weap, &track, &TB, &col, &player, tick_no);
             }
             /* steering-lean animation: step toward target 1 frame/tick */
             {

@@ -211,7 +211,7 @@ void wweap_reset(WWeapons *w);
 void wweap_fire(WWeapons *w, WPhys *p, const WTrack *t, const WTables *tb,
                 bool fire_btn, int tick, int *sound_out);
 void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
-                const WCollide *col, int shooter_angle, int tick);
+                const WCollide *col, WPhys *player, int tick);
 int  wweap_enum(const WWeapons *w, int i, int *x, int *y, const uint8_t **sprite);
 int  wweap_count(void);
 

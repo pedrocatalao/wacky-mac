@@ -65,7 +65,7 @@ static int32_t tscale(int32_t t, int32_t s) {
  * Returns hit code: 0 none, 1 wall, 2 object, 3 kart. */
 static int proj_step(Proj *pr, const WTrack *t, const WTables *tb,
                      const WCollide *col, int shooter_angle, int do_collide,
-                     int *hit_kart_idx) {
+                     int *hit_kart_idx, const WPhys *player, int *hit_player) {
     int ang;
     int stationary = 0;
     if (pr->type < 1 || pr->type == 5) {
@@ -109,6 +109,28 @@ static int proj_step(Proj *pr, const WTrack *t, const WTables *tb,
                 }
             }
         }
+        /* the player is kart 0: same Manhattan 0x12 test, with the owner
+         * immunity from ProjProbe — your own drop only arms once it is no
+         * longer overlapping you, and types 0/5 never hit their owner */
+        if (player) {
+            int dx2 = player->worldx - x, dy2 = player->worldy - y;
+            if (dx2 < 0) dx2 = -dx2;
+            if (dy2 < 0) dy2 = -dy2;
+            int in_range = (dx2 + dy2) < 0x12;
+            if (pr->owner == 0) {
+                if (in_range) {
+                    if (pr->owner_overlap || pr->type == 0 || pr->type == 5)
+                        in_range = 0;
+                } else if (pr->owner_overlap) {
+                    pr->owner_overlap = 0;      /* cleared it: now armed */
+                }
+            }
+            if (in_range) {
+                if (hit_player) *hit_player = 1;
+                hit = 3;
+                break;
+            }
+        }
         if (i == steps) break;
         if (dy < dx) { e += dy; if (e > dx) { y += sy; e -= dx; } x += sx; }
         else         { e += dx; if (e > dy) { x += sx; e -= dy; } y += sy; }
@@ -133,7 +155,7 @@ static Proj *spawn(WWeapons *w, int type, int owner, int kart_x, int kart_y,
         p->angle = w->spawn_angle;
         p->x = kart_x;
         p->y = kart_y;
-        proj_step(p, t, tb, NULL, shooter_angle, 0, NULL);  /* free step */
+        proj_step(p, t, tb, NULL, shooter_angle, 0, NULL, NULL, NULL);  /* free step */
         p->travelled = 0;
         p->frame = 0;
         p->sprite = w->spawn_sprite;
@@ -221,7 +243,8 @@ void wweap_fire(WWeapons *w, WPhys *p, const WTrack *t, const WTables *tb,
 
 /* FUN_0002602c — per-tick projectile update */
 void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
-                const WCollide *col, int shooter_angle, int tick) {
+                const WCollide *col, WPhys *player, int tick) {
+    int shooter_angle = player ? player->angle : 0;
     if (!w->hog) return;
     for (int i = 0; i < PROJ_MAX; i++) {
         Proj *pr = &w->pool[i];
@@ -234,9 +257,10 @@ void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
         }
         if (pr->state == 0xFF) continue;        /* exploding: no motion */
 
-        int victim = -1;
+        int victim = -1, struck_player = 0;
         int used = pr->speed;
-        int hit = proj_step(pr, t, tb, col, shooter_angle, 1, &victim);
+        int hit = proj_step(pr, t, tb, col, shooter_angle, 1, &victim,
+                            player, &struck_player);
 
         if (pr->type == 1) {
             if (hit == 1 || hit == 2) {          /* side shots bounce 180 */
@@ -254,6 +278,14 @@ void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
         if (hit) {
             if (hit == 3 && victim >= 0)
                 wai_kart_hit(col->kart_ctx, victim, pr->type == 5 ? 2 : 1, tick);
+            /* the player spins out when struck (human-victim branch of
+             * ProjProbe); the spin machinery is already in the physics */
+            if (struck_player && player && player->spin_dir == 0) {
+                player->spin_dir = 1;
+                player->spin_step = 0;
+                player->drift = 0;
+                player->hold_l = player->hold_r = 0;
+            }
             if (w->live > 0) w->live--;
             pr->state = 0xFF;
             pr->frame_count = 3;
