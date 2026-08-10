@@ -177,6 +177,15 @@ static void player_move(const PhysCtx *c, WPhys *p) {
     }
     if (p->collide || p->drift) p->skid = 1;
 
+    /* bump response (FUN_00022bf4 tail): any object/kart contact cancels a
+     * drift or spin and zeroes the throttle if one was active; the kart is
+     * NOT otherwise slowed — it just stopped at the contact point */
+    if (p->collide == 2 || p->collide == 3) {
+        if (p->drift)    { p->drift = 0;    p->throttle = 0; }
+        if (p->spin_dir) { p->spin_dir = 0; p->throttle = 0; }
+        p->scraping = 1;
+    }
+
     if (p->collide == 1) {
         /* wall: stop, push back 0x20 along flipped facing, whiskers, throttle 0 */
         if (p->drift) { p->drift = 0; p->throttle = 0; }

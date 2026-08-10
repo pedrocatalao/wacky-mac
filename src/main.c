@@ -285,16 +285,25 @@ int main(int argc, char **argv) {
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
             wphys_tick(&player, &track, &TB, &in, 1, &col);
             wscene_resolve_pickups(scene, &player);
-            /* ramming: at full throttle, hitting an opponent from behind
-             * (its heading within one octant of yours) destroys it */
-            if (ai && player.collide == 3 && player.throttle > 99) {
+            /* ramming (FUN_00022bf4): at full throttle, not skidding and not
+             * airborne, hitting an opponent whose camera-relative octant is
+             * 0/1/7 (you caught it from behind) destroys it — and takes you
+             * out too: the original zeroes the player's throttle and sets the
+             * out-of-race flag that runs the crash camera. */
+            if (ai && player.collide == 3 && player.throttle > 99 &&
+                !player.skid && player.hop_state == 0) {
                 int kx, ky, compass;
                 wai_kart_state(ai, player.collide_kart, &kx, &ky, &compass);
                 int cam_oct = player.angle / 240;
                 if (player.angle % 240 > 0x77) cam_oct++;
                 int rel = (compass - (cam_oct & 7)) & 7;
-                if (rel == 0 || rel == 1 || rel == 7)
+                if (rel == 0 || rel == 1 || rel == 7) {
                     wai_kart_ram(ai, player.collide_kart);
+                    player.throttle = 0;
+                    player.speed = 0;
+                    player.drift = 0;
+                    player.spin_dir = 0;
+                }
             }
             player.collide = 0;
             if (weap) {
