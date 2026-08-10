@@ -1,0 +1,21 @@
+# build output
+build/
+compile_commands.json
+
+# python venv
+.venv/
+
+# extracted/converted game assets (copyrighted — you must own the game)
+extracted/
+png/
+tracks/
+sprites/
+*.ppm
+frame*.png
+back1_planar.png
+kart_zoom.png
+scratch_*.png
+
+.DS_Store
+.cache/
+__pycache__/
