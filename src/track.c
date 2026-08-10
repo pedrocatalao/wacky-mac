@@ -245,11 +245,16 @@ bool wtables_load(WTables *tb, const WDat *dat) {
             if ((size_t)(rec - p) + 0x12E > len) break;
             memcpy(&tb->sdx_drag[i], rec + 0x120, 4);
             memcpy(&tb->sdx_grip[i], rec + 0x124, 2);
-            memcpy(&tb->sdx_eff_off[i], rec + 0x104, 4);
-            memcpy(&tb->sdx_eff_size[i], rec + 0x114, 2);
-            memcpy(&tb->sdx_eff_w[i], rec + 0x116, 2);
-            memcpy(&tb->sdx_eff_h[i], rec + 0x118, 2);
-            memcpy(&tb->sdx_eff_n[i], rec + 0x11E, 2);
+            memcpy(&tb->sdx_effA_off[i],  rec + 0x100, 4);
+            memcpy(&tb->sdx_effA_size[i], rec + 0x108, 2);
+            memcpy(&tb->sdx_effA_w[i],    rec + 0x10A, 2);
+            memcpy(&tb->sdx_effA_h[i],    rec + 0x10C, 2);
+            memcpy(&tb->sdx_effA_n[i],    rec + 0x112, 2);
+            memcpy(&tb->sdx_effB_off[i],  rec + 0x104, 4);
+            memcpy(&tb->sdx_effB_size[i], rec + 0x114, 2);
+            memcpy(&tb->sdx_effB_w[i],    rec + 0x116, 2);
+            memcpy(&tb->sdx_effB_h[i],    rec + 0x118, 2);
+            memcpy(&tb->sdx_effB_n[i],    rec + 0x11E, 2);
         }
     }
     tb->effects = wdat_find(dat, "EFFECTS.SP", &tb->effects_len);

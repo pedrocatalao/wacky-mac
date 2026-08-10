@@ -95,6 +95,22 @@ static void render_view(const WTrack *t, const WPhys *p, bool left, bool right) 
     }
 }
 
+/* engine effect overlay (exhaust smoke / dust): per-surface EFFECTS.SP frame
+ * drawn at the kart's display position + (xoff, 0x10) — WW.EXE FUN_00024bcc */
+static void draw_effect(const uint8_t *frame, const uint8_t dac[768],
+                        int w, int h, int sx, int sy) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            uint8_t px = frame[x * h + y];       /* column-major source */
+            if (px == WW_SP_TRANSPARENT) continue;
+            int py = sy + y, pxx = sx + x;
+            if (py < 0 || py >= WW_SCREEN_H || pxx < 0 || pxx >= WW_SCREEN_W) continue;
+            fb[(size_t)py * WW_SCREEN_W + pxx] =
+                0xFF000000u | (uint32_t)dac[px * 3 + 2] << 16 |
+                (uint32_t)dac[px * 3 + 1] << 8 | dac[px * 3];
+        }
+}
+
 /* player kart blit: native 38x28 column-major frame, centered, ground row 192 */
 static void draw_kart_raw(const uint8_t *frame, const uint8_t dac[768], int y_lift) {
     if (!frame) return;
@@ -216,8 +232,9 @@ int main(int argc, char **argv) {
                         wai_progress(ai, &track);
                     }
                 }
-                fprintf(stderr, "player pos (%d,%d) angle %d\n",
-                        player.posx, player.posy, player.angle);
+                fprintf(stderr, "player pos (%d,%d) angle %d speed %d surface %u\n",
+                        player.posx, player.posy, player.angle, player.speed,
+                        player.surface);
                 for (int k = 1; ai && k < 8; k++) {
                     int kx, ky, comp;
                     wai_kart_state(ai, k, &kx, &ky, &comp);
@@ -332,7 +349,23 @@ int main(int argc, char **argv) {
                 /* speed bounce (+1px jitter while moving) — the original's
                  * bounce offset */
                 int bounce = (player.speed > 0 && (tick_no & 1)) ? 1 : 0;
-                draw_kart_raw(kf, track.dac, player.hop_height + bounce);
+                int lift = player.hop_height + bounce;
+                /* engine effect: drawn only while moving (speed != 0), frames
+                 * cycle per tick; sprite set comes from the surface under the
+                 * kart, so it becomes dust off-road */
+                draw_kart_raw(kf, track.dac, lift);
+                /* effect draws over the kart (original draws it after) */
+                uint32_t sf = player.surface;
+                if (TB.effects && player.speed > 0 && sf < 64 &&
+                    TB.sdx_effA_n[sf] > 0 && TB.sdx_effA_size[sf] > 0) {
+                    int w = TB.sdx_effA_w[sf], h = TB.sdx_effA_h[sf];
+                    uint32_t off = TB.sdx_effA_off[sf] +
+                        (uint32_t)(tick_no % TB.sdx_effA_n[sf]) * TB.sdx_effA_size[sf];
+                    if (off + (uint32_t)(w * h) <= TB.effects_len)
+                        draw_effect(TB.effects + off, track.dac, w, h,
+                                    WW_SCREEN_W / 2 - KART_W / 2 + (KART_W - w) / 2,
+                                    192 - KART_H + 0x10 - lift);
+                }
             }
             if (dump_path) {
                 FILE *f = fopen(dump_path, "wb");

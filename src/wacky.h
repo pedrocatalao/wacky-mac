@@ -127,9 +127,11 @@ typedef struct {
                                                    source triples (entries 0..64) */
     uint32_t sdx_drag[64];                      /* per surface type, 16.16 */
     uint16_t sdx_grip[64];
-    /* per-surface engine/dust effect (descriptor B): frames in EFFECTS.SP */
-    uint32_t sdx_eff_off[64];
-    uint16_t sdx_eff_size[64], sdx_eff_w[64], sdx_eff_h[64], sdx_eff_n[64];
+    /* per-surface engine effect, two layers (A big, B small); byte offsets
+     * into EFFECTS.SP + frame geometry (WACKY.SDX record fields) */
+    uint32_t sdx_effA_off[64], sdx_effB_off[64];
+    uint16_t sdx_effA_size[64], sdx_effA_w[64], sdx_effA_h[64], sdx_effA_n[64];
+    uint16_t sdx_effB_size[64], sdx_effB_w[64], sdx_effB_h[64], sdx_effB_n[64];
     const uint8_t *effects;                     /* EFFECTS.SP raw */
     uint32_t effects_len;
     int      sdx_count;
