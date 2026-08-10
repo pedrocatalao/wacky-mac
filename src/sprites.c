@@ -45,6 +45,7 @@ struct WScene {
     Inf      inf[MAX_INF];
     int      ninf;
     int16_t  rowtab[0x1000];    /* dist -> screen ground row */
+    const uint8_t *squash;      /* GENEF.SP + 0x1DD9: 4 frames of 38x28 */
     /* other karts (static grid until AI lands) */
     int      kart_x[8], kart_y[8], kart_angle[8];
 };
@@ -128,6 +129,13 @@ WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum) {
     inf_for_dims(s, dat, 38, 28);
     inf_for_dims(s, dat, 18, 13);
 
+    /* squashed-kart frames live inside GENEF.SP */
+    {
+        uint32_t glen;
+        const uint8_t *g = wdat_find(dat, "GENEF.SP", &glen);
+        if (g && glen > 0x1DD9 + 4 * 0x428) s->squash = g + 0x1DD9;
+    }
+
     /* .SPW: u16 count, then 6 x s16 {type, anim, x, y, ?, frame}; +0x400 */
     char name[16];
     snprintf(name, sizeof name, "%d.SPW", tracknum);
@@ -190,6 +198,23 @@ int wscene_hit_object(void *ctx, int x, int y) {
             in->anim = 1;
             return s->types[in->type].behavior <= 0;
         }
+    }
+    return 0;
+}
+
+/* read-only probe used by projectiles: any live object within Manhattan 0xE.
+ * Unlike the kart probe this does NOT mark the object as touched, so a
+ * projectile flying past a crate cannot collect it (ProjProbe @13022). */
+int wscene_blocks(void *ctx, int x, int y) {
+    const WScene *s = ctx;
+    if (!s) return 0;
+    for (int i = 0; i < s->ninst; i++) {
+        const ObjInst *in = &s->inst[i];
+        if (in->anim == -1) continue;
+        int dx = in->x - x, dy = in->y - y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        if (dx + dy < 0xE) return 1;
     }
     return 0;
 }
@@ -352,17 +377,24 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
         if (p->angle % 240 > 0x77) cam_oct++;
         cam_oct &= 7;
         for (int k = 1; k < 8; k++) {
-            int kx, ky, compass;
-            wai_kart_state(ai, k, &kx, &ky, &compass);
+            int kx, ky, compass, hitframe = 0;
+            int mode = wai_kart_render(ai, k, &kx, &ky, &compass, &hitframe);
+            if (mode == 3) continue;                 /* destroyed and gone */
             DrawEnt e;
             if (!project(tb, p, kx, ky, &e)) continue;
-            /* viewTable seed K=6: composes to rear view (4) for same-heading */
-            int frame = (compass - cam_oct + 6) & 7;
-            int sprite = k == player_kart ? 0 : k;   /* keep player's kart unique */
             e.inf = kart_inf;
             e.src_w = 38;
             e.src_h = 28;
-            e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
+            int sprite = k == player_kart ? 0 : k;   /* keep player's kart unique */
+            if (mode == 2) {                         /* squashed flat */
+                if (!s->squash) continue;
+                e.frame = s->squash + (size_t)hitframe * 0x428;
+            } else {
+                /* spinning karts cycle their own 8 rotation frames;
+                 * viewTable seed K=6 gives the rear view for same-heading */
+                int frame = (mode == 1) ? hitframe : ((compass - cam_oct + 6) & 7);
+                e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
+            }
             list[n++] = e;
         }
     }

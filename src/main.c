@@ -285,6 +285,18 @@ int main(int argc, char **argv) {
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
             wphys_tick(&player, &track, &TB, &in, 1, &col);
             wscene_resolve_pickups(scene, &player);
+            /* ramming: at full throttle, hitting an opponent from behind
+             * (its heading within one octant of yours) destroys it */
+            if (ai && player.collide == 3 && player.throttle > 99) {
+                int kx, ky, compass;
+                wai_kart_state(ai, player.collide_kart, &kx, &ky, &compass);
+                int cam_oct = player.angle / 240;
+                if (player.angle % 240 > 0x77) cam_oct++;
+                int rel = (compass - (cam_oct & 7)) & 7;
+                if (rel == 0 || rel == 1 || rel == 7)
+                    wai_kart_ram(ai, player.collide_kart);
+            }
+            player.collide = 0;
             if (weap) {
                 wweap_fire(weap, &player, &track, &TB, fire, tick_no, NULL);
                 wweap_tick(weap, &track, &TB, &col, player.angle, tick_no);

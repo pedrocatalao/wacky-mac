@@ -99,7 +99,7 @@ static int proj_step(Proj *pr, const WTrack *t, const WTables *tb,
     for (int i = 0; i <= steps && !hit; i++) {
         if (ww_surface_at(t, (uint16_t)x, (uint16_t)y) == 3) { hit = 1; break; }
         if (col) {
-            if (col->hit_object && col->hit_object(col->obj_ctx, x, y)) { hit = 2; break; }
+            if (wscene_blocks(col->obj_ctx, x, y)) { hit = 2; break; }
             if (col->hit_kart) {
                 int k = wai_kart_at(col->kart_ctx, x, y);
                 if (k >= 0) {

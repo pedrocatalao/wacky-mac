@@ -161,6 +161,7 @@ typedef struct {
     int     fire_latch, last_fire_tick;
     int     in_water, splash;
     int     collide;         /* 0 none, 1 wall, 2 object, 3 kart, 4 ramp-hop  */
+    int     collide_kart;    /* index of the kart hit when collide == 3       */
     int     object_hit;
     int     skid, scraping;
     uint32_t surface;
@@ -198,6 +199,8 @@ int  wai_hit_kart(void *ctx, int x, int y);
  * (spin_state 1 = spin 0x21 ticks, 2 = squash 0x32 ticks) */
 int  wai_kart_at(void *ctx, int x, int y);
 void wai_kart_hit(void *ctx, int idx, int spin_state, int tick);
+void wai_kart_ram(WAi *ai, int idx);
+int  wai_kart_render(const WAi *ai, int i, int *x, int *y, int *compass, int *frame);
 
 /* ---- Weapons / projectiles (src/weapons.c) ---- */
 
@@ -219,6 +222,7 @@ WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum);
 void    wscene_free(WScene *s);
 void    wscene_tick(WScene *s);
 int     wscene_hit_object(void *ctx, int x, int y);
+int     wscene_blocks(void *ctx, int x, int y);
 void    wscene_resolve_pickups(WScene *s, WPhys *p);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,

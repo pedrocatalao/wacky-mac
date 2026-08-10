@@ -110,9 +110,13 @@ static void probe_step(const PhysCtx *c, WPhys *p,
             p->collide = 2;
             return;
         }
-        if (c->col->hit_kart && c->col->hit_kart(c->col->kart_ctx, px, py)) {
-            p->object_hit = 1;
-            p->collide = 3;
+        if (c->col->hit_kart) {
+            int k = c->col->hit_kart(c->col->kart_ctx, px, py);
+            if (k) {
+                p->object_hit = 1;
+                p->collide = 3;
+                p->collide_kart = k - 1;
+            }
         }
     }
 }

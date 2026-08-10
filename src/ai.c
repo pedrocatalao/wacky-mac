@@ -36,6 +36,8 @@ struct WAi {
         int lap, prev_cell;
         int32_t progress;
         int spin_state, hit_tick;   /* 1 = spin (0x21 ticks), 2 = squash (0x32) */
+        int spin_frame;             /* rotation frame cycled while spinning    */
+        int hit_flag, squash_frame; /* 2 = rammed/destroyed, 4-frame squash    */
     } k[8];
 
     int top_idx;                  /* aiTopSpeedIdx */
@@ -161,9 +163,17 @@ void wai_reset(WAi *ai, const WTrack *t, int class_id, int engine12,
 void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_rank) {
     for (int i = 1; i < 8; i++) {
         struct AiKart *k = &ai->k[i];
+        /* destroyed: 4-frame squash animation, then the kart is gone
+         * (FUN_000261fc + the kart draw's hitFlag == 2 branch) */
+        if (k->hit_flag == 2) {
+            if (k->squash_frame < 4) k->squash_frame++;
+            continue;
+        }
         /* hit karts stand still until the spin/squash animation ends
-         * (FUN_000289ec: 0x21 ticks spinning, 0x32 squashed) */
+         * (FUN_000289ec: 0x21 ticks spinning, 0x32 squashed); while spinning
+         * the sprite cycles through the kart's own 8 rotation frames */
         if (k->spin_state) {
+            if (k->spin_state == 1) k->spin_frame = (k->spin_frame + 1) & 7;
             if (++k->hit_tick >= (k->spin_state == 1 ? 0x21 : 0x32)) {
                 k->spin_state = 0;
                 k->hit_tick = 0;
@@ -280,15 +290,44 @@ void wai_kart_hit(void *ctx, int idx, int spin_state, int tick) {
     ai->k[idx].hit_tick = 0;
 }
 
-/* collision probe: any AI kart within Manhattan 0xE of (x,y) */
+/* collision probe: index+1 of an AI kart within Manhattan 0xE of (x,y) */
 int wai_hit_kart(void *ctx, int x, int y) {
     const WAi *ai = ctx;
     if (!ai) return 0;
     for (int i = 1; i < 8; i++) {
+        if (ai->k[i].hit_flag == 2) continue;
         int dx = ai->k[i].x - x, dy = ai->k[i].y - y;
         if (dx < 0) dx = -dx;
         if (dy < 0) dy = -dy;
-        if (dx + dy < 0xE) return 1;
+        if (dx + dy < 0xE) return i + 1;
+    }
+    return 0;
+}
+
+/* rammed from behind at full throttle: kart is destroyed (hitFlag 2) */
+void wai_kart_ram(WAi *ai, int idx) {
+    if (!ai || idx < 1 || idx > 7) return;
+    ai->k[idx].hit_flag = 2;
+    ai->k[idx].squash_frame = 0;
+    ai->k[idx].spin_state = 0;
+}
+
+/* render state: 0 normal (use compass), 1 spinning (frame = rotation frame),
+ * 2 squashed (frame = squash frame 0..3), 3 hidden */
+int wai_kart_render(const WAi *ai, int i, int *x, int *y, int *compass, int *frame) {
+    if (!ai || i < 1 || i > 7) return 3;
+    const struct AiKart *k = &ai->k[i];
+    *x = k->x;
+    *y = k->y;
+    *compass = k->compass;
+    if (k->hit_flag == 2) {
+        if (k->squash_frame > 3) return 3;
+        *frame = k->squash_frame;
+        return 2;
+    }
+    if (k->spin_state == 1) {
+        *frame = k->spin_frame;
+        return 1;
     }
     return 0;
 }
