@@ -157,7 +157,8 @@ typedef struct {
     int     turbo, turbo_timer;
     int     engine_state, engine_anim;   /* kart +0x62 / +0x54: exhaust anim */
     int     in_water, splash;
-    int     collide;         /* 0 none, 1 wall, 4 ramp-hop                    */
+    int     collide;         /* 0 none, 1 wall, 2 object, 3 kart, 4 ramp-hop  */
+    int     object_hit;
     int     skid, scraping;
     uint32_t surface;
     uint32_t drag;           /* 16.16, from SDX */
@@ -168,9 +169,16 @@ typedef struct {
     bool accel, brake, left, right, hop;
 } WPhysInput;
 
+/* collision probes into the world (objects / other karts), Manhattan < 0xE */
+typedef struct {
+    int (*hit_object)(void *ctx, int x, int y);
+    int (*hit_kart)(void *ctx, int x, int y);
+    void *obj_ctx, *kart_ctx;
+} WCollide;
+
 void wphys_reset(WPhys *p, const WTrack *t);
 void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
-                const WPhysInput *in, int detail_level);
+                const WPhysInput *in, int detail_level, const WCollide *col);
 
 /* ---- AI karts (.RD position-scripted; see src/ai.c) ---- */
 
@@ -182,6 +190,7 @@ void wai_reset(WAi *ai, const WTrack *t, int class_id, int engine12,
 void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_rank);
 void wai_progress(WAi *ai, const WTrack *t);
 void wai_kart_state(const WAi *ai, int i, int *x, int *y, int *compass);
+int  wai_hit_kart(void *ctx, int x, int y);
 
 /* ---- World scene: objects (.SPW/SPRITE.ATR) + kart billboards ---- */
 
@@ -189,6 +198,7 @@ typedef struct WScene WScene;
 WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum);
 void    wscene_free(WScene *s);
 void    wscene_tick(WScene *s);
+int     wscene_hit_object(void *ctx, int x, int y);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
                     const WAi *ai);

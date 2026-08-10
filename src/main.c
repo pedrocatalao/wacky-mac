@@ -227,8 +227,9 @@ int main(int argc, char **argv) {
                 if (st) pre = -pre;
                 WPhysInput in = { true, false, st, false, false };
                 if (st) steer_anim = 0;
+                WCollide pcol = { wscene_hit_object, wai_hit_kart, scene, ai };
                 for (int i = 0; i < pre; i++) {
-                    wphys_tick(&player, &track, &TB, &in, 1);
+                    wphys_tick(&player, &track, &TB, &in, 1, &pcol);
                     if (scene) wscene_tick(scene);
                     if (ai) {
                         wai_tick(ai, &TB, 0, 1);
@@ -278,7 +279,8 @@ int main(int argc, char **argv) {
         bool ticked = false;
         while (acc_ms >= TICK_MS) {          /* authentic 11.34 Hz fixed step */
             WPhysInput in = { accel, brake, left, right, hop };
-            wphys_tick(&player, &track, &TB, &in, 1);
+            WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
+            wphys_tick(&player, &track, &TB, &in, 1, &col);
             /* steering-lean animation: step toward target 1 frame/tick */
             {
                 int target = left ? 0 : right ? 4 : 2;

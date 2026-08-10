@@ -26,6 +26,7 @@
 typedef struct {
     const WTrack  *track;
     const WTables *tb;
+    const WCollide *col;
 } PhysCtx;
 
 static int wrapa(int a) {
@@ -99,7 +100,21 @@ static void probe_step(const PhysCtx *c, WPhys *p,
         p->collide = 4;
         return;
     }
-    if (s == SURF_WALL) p->collide = 1;
+    if (s == SURF_WALL) { p->collide = 1; return; }
+
+    /* objects then other karts, Manhattan distance < 0xE (probe_step) */
+    if (p->hop_state == 0 && c->col) {
+        int px = wx + nx, py = wy + ny;
+        if (c->col->hit_object && c->col->hit_object(c->col->obj_ctx, px, py)) {
+            p->object_hit = 1;
+            p->collide = 2;
+            return;
+        }
+        if (c->col->hit_kart && c->col->hit_kart(c->col->kart_ctx, px, py)) {
+            p->object_hit = 1;
+            p->collide = 3;
+        }
+    }
 }
 
 static void walk_path(const PhysCtx *c, WPhys *p,
@@ -316,8 +331,8 @@ spin_done:
 /* ---- per-tick entry (FUN_000290a0) ---- */
 
 void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
-                const WPhysInput *in, int detail_level) {
-    PhysCtx c = { t, tb };
+                const WPhysInput *in, int detail_level, const WCollide *col) {
+    PhysCtx c = { t, tb, col };
     static const int rates[4] = { 0x28, 0x28, 0x24, 0x20 };
     int steer_rate = rates[detail_level & 3];
 

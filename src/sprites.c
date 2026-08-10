@@ -173,6 +173,25 @@ void wscene_free(WScene *s) {
     free(s);
 }
 
+/* collision probe: any live object within Manhattan 0xE of (x,y).
+ * Marks the object hit (state 1) exactly as probe_step does. */
+int wscene_hit_object(void *ctx, int x, int y) {
+    WScene *s = ctx;
+    if (!s) return 0;
+    for (int i = 0; i < s->ninst; i++) {
+        ObjInst *in = &s->inst[i];
+        if (in->anim == -1) continue;
+        int dx = in->x - x, dy = in->y - y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        if (dx + dy < 0xE) {
+            in->anim = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* ---- per-tick object animation (FUN_000261fc) ---- */
 void wscene_tick(WScene *s) {
     for (int i = 0; i < s->ninst; i++) {
