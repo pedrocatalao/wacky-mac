@@ -346,12 +346,14 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
             if (p->throttle < 0) p->throttle = 0;
             p->speed = tb->vel[p->throttle];
         }
+        if (!accel && p->engine_state > 2) p->engine_state = 0;
         if (!accel && !p->turbo) {
             p->throttle -= 4;
             if (p->throttle < 0) p->throttle = 0;
         } else if (!p->turbo) {
             p->throttle += 10;
             if (p->throttle > 100) p->throttle = 100;
+            if (p->engine_state == 0) { p->engine_state = 1; p->engine_anim = 0; }
         } else {
             if (--p->turbo_timer < 1) p->turbo = 0;
         }
@@ -393,6 +395,15 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
         p->speed = tb->vel[p->throttle];
     } else if (p->throttle < 1) {
         p->turbo = 0;
+    }
+
+    /* exhaust animation (FUN_000261fc): frames 0..3; every 4 ticks the engine
+     * state advances, so the accel smoke only shows briefly after each press
+     * (engine_state > 1 stops it drawing; releasing accel re-arms it) */
+    p->engine_anim++;
+    if (p->engine_anim > 3) {
+        p->engine_anim = 0;
+        if (p->engine_state != 0) p->engine_state++;
     }
 
     /* water splash decay */

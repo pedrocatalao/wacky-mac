@@ -190,6 +190,9 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 8; i++)
         char_raw[i] = wdat_find(&dat, char_names[i], NULL);
     int steer_anim = 2;      /* 0..4, 2 = straight (SPR_IDLE animFrame) */
+    /* exhaust sprite sets live inside HOGMIS.SP: +0xA0E idle, +0xDB6 accel,
+     * +0x115E turbo; 18x13 frames of 0xEA bytes */
+    const uint8_t *hogmis = wdat_find(&dat, "HOGMIS.SP", NULL);
     int tick_no = 0;
     WPhys player;
     int cyc_cnt60 = 0, cyc_cnt50 = 0, cyc_ph_a = 0, cyc_ph_b = 0;
@@ -232,9 +235,6 @@ int main(int argc, char **argv) {
                         wai_progress(ai, &track);
                     }
                 }
-                fprintf(stderr, "player pos (%d,%d) angle %d speed %d surface %u\n",
-                        player.posx, player.posy, player.angle, player.speed,
-                        player.surface);
                 for (int k = 1; ai && k < 8; k++) {
                     int kx, ky, comp;
                     wai_kart_state(ai, k, &kx, &ky, &comp);
@@ -269,7 +269,9 @@ int main(int argc, char **argv) {
         if (acc_ms > 500) acc_ms = 500;
 
         const Uint8 *keys = SDL_GetKeyboardState(NULL);
-        bool accel = keys[SDL_SCANCODE_UP], brake = keys[SDL_SCANCODE_DOWN];
+        if (dump_path) { acc_ms = TICK_MS; }   /* deterministic single tick */
+        bool accel = keys[SDL_SCANCODE_UP] || dump_path != NULL;
+        bool brake = keys[SDL_SCANCODE_DOWN];
         bool left = keys[SDL_SCANCODE_LEFT], right = keys[SDL_SCANCODE_RIGHT];
         bool hop = keys[SDL_SCANCODE_X];
 
@@ -354,17 +356,59 @@ int main(int argc, char **argv) {
                  * cycle per tick; sprite set comes from the surface under the
                  * kart, so it becomes dust off-road */
                 draw_kart_raw(kf, track.dac, lift);
-                /* effect draws over the kart (original draws it after) */
+
+                /* --- overlays, drawn after the kart (FUN_00024bcc order) --- */
+                int dx0 = WW_SCREEN_W / 2 - KART_W / 2;   /* display x */
+                int dy0 = 192 - KART_H - lift;            /* display y */
+                bool overlays = player.hop_state == 0 && !player.in_water &&
+                                player.spin_dir == 0 && player.drift == 0;
+
+                /* exhaust (FUN_00024afc): 18x13, two copies 0xb apart at
+                 * (x+5, y+0xb). Sprite set by engine state / throttle. */
+                if (overlays && hogmis) {
+                    const uint8_t *base = NULL;
+                    if (player.engine_state == 0) {
+                        if (player.throttle >= 0 && player.throttle <= 10)
+                            base = hogmis + 0xA0E;              /* idle puff  */
+                    } else if (player.engine_state <= 1) {
+                        base = hogmis + 0xDB6;                  /* accel smoke */
+                    }
+                    if (player.throttle > 100) base = hogmis + 0x115E;  /* turbo flame */
+                    if (base) {
+                        const uint8_t *f = base + (size_t)player.engine_anim * 0xEA;
+                        draw_effect(f, track.dac, 0x12, 0xD, dx0 + 5, dy0 + 0xB);
+                        draw_effect(f, track.dac, 0x12, 0xD, dx0 + 5 + 0xB, dy0 + 0xB);
+                    }
+                }
+
+                /* tire dust (per-surface, descriptor B): two copies at the rear
+                 * wheels while moving; layout depends on the sprite height */
                 uint32_t sf = player.surface;
-                if (TB.effects && player.speed > 0 && sf < 64 &&
+                if (overlays && TB.effects && player.speed != 0 && sf < 64 &&
+                    TB.sdx_effB_n[sf] > 0 && TB.sdx_effB_size[sf] > 0) {
+                    int w = TB.sdx_effB_w[sf], h = TB.sdx_effB_h[sf];
+                    uint32_t off = TB.sdx_effB_off[sf] +
+                        (uint32_t)(tick_no % TB.sdx_effB_n[sf]) * TB.sdx_effB_size[sf];
+                    int ex, ey, gap;
+                    if (h == 0x18) { ex = dx0 + 1; ey = dy0 + 4;    gap = 0x18; }
+                    else           { ex = dx0;     ey = dy0 + 0x14; gap = 0x1C; }
+                    if (off + (uint32_t)(w * h) <= TB.effects_len) {
+                        draw_effect(TB.effects + off, track.dac, w, h, ex, ey);
+                        draw_effect(TB.effects + off, track.dac, w, h, ex + gap, ey);
+                    }
+                }
+
+                /* skid/drift smoke (descriptor A): one copy at (x, y+0x10)
+                 * while the drift/spin frames are showing */
+                if (TB.effects && player.speed != 0 && sf < 64 &&
+                    (player.drift || player.spin_dir) &&
                     TB.sdx_effA_n[sf] > 0 && TB.sdx_effA_size[sf] > 0) {
                     int w = TB.sdx_effA_w[sf], h = TB.sdx_effA_h[sf];
                     uint32_t off = TB.sdx_effA_off[sf] +
                         (uint32_t)(tick_no % TB.sdx_effA_n[sf]) * TB.sdx_effA_size[sf];
                     if (off + (uint32_t)(w * h) <= TB.effects_len)
                         draw_effect(TB.effects + off, track.dac, w, h,
-                                    WW_SCREEN_W / 2 - KART_W / 2 + (KART_W - w) / 2,
-                                    192 - KART_H + 0x10 - lift);
+                                    dx0, dy0 + 0x10);
                 }
             }
             if (dump_path) {

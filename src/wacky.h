@@ -155,6 +155,7 @@ typedef struct {
     int     hop_turn_dir, hop_turn_cnt;   /* handbrake sharp turn             */
     int     hop_state, hop_air, hop_height, hop_maxh;  /* ramp jumps          */
     int     turbo, turbo_timer;
+    int     engine_state, engine_anim;   /* kart +0x62 / +0x54: exhaust anim */
     int     in_water, splash;
     int     collide;         /* 0 none, 1 wall, 4 ramp-hop                    */
     int     skid, scraping;
