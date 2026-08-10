@@ -185,7 +185,7 @@ void wscene_free(WScene *s) {
 /* collision probe: any live object within Manhattan 0xE of (x,y). Marks it
  * touched (state 1); only SOLID scenery (behavior <= 0) blocks movement —
  * pickups are resolved after the tick by wscene_resolve_pickups. */
-int wscene_hit_object(void *ctx, int x, int y) {
+int wscene_hit_object(void *ctx, int x, int y, int *ox, int *oy) {
     WScene *s = ctx;
     if (!s) return 0;
     for (int i = 0; i < s->ninst; i++) {
@@ -196,6 +196,8 @@ int wscene_hit_object(void *ctx, int x, int y) {
         if (dy < 0) dy = -dy;
         if (dx + dy < 0xE) {
             in->anim = 1;
+            if (ox) *ox = in->x;
+            if (oy) *oy = in->y;
             return s->types[in->type].behavior <= 0;
         }
     }

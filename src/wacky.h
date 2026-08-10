@@ -166,6 +166,10 @@ typedef struct {
     int     collide_kart;    /* index of the kart hit when collide == 3       */
     int     object_hit;
     int     skid, scraping;
+    /* pending bump deflection (FUN_0002d3fc): set on contact, applied on the
+     * next tick — rotate 0x12 away from the hit side, nudge 1 unit forward,
+     * and (kart hits only) throttle +/- 0x28 by relative position */
+    int     bump_pending, bump_horz, bump_vert, bump_kart;
     uint32_t surface;
     uint32_t drag;           /* 16.16, from SDX */
     uint16_t grip;
@@ -175,10 +179,11 @@ typedef struct {
     bool accel, brake, left, right, hop;
 } WPhysInput;
 
-/* collision probes into the world (objects / other karts), Manhattan < 0xE */
+/* collision probes into the world (objects / other karts), Manhattan < 0xE.
+ * ox/oy receive the position of the thing hit (used for the bump deflection) */
 typedef struct {
-    int (*hit_object)(void *ctx, int x, int y);
-    int (*hit_kart)(void *ctx, int x, int y);
+    int (*hit_object)(void *ctx, int x, int y, int *ox, int *oy);
+    int (*hit_kart)(void *ctx, int x, int y, int *ox, int *oy);
     void *obj_ctx, *kart_ctx;
 } WCollide;
 
@@ -196,7 +201,7 @@ void wai_reset(WAi *ai, const WTrack *t, int class_id, int engine12,
 void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_rank);
 void wai_progress(WAi *ai, const WTrack *t);
 void wai_kart_state(const WAi *ai, int i, int *x, int *y, int *compass);
-int  wai_hit_kart(void *ctx, int x, int y);
+int  wai_hit_kart(void *ctx, int x, int y, int *ox, int *oy);
 /* projectile probes: kart within Manhattan 0x12, and the hit reaction
  * (spin_state 1 = spin 0x21 ticks, 2 = squash 0x32 ticks) */
 int  wai_kart_at(void *ctx, int x, int y);
@@ -224,7 +229,7 @@ typedef struct WScene WScene;
 WScene *wscene_load(const WDat *dat, const WTrack *t, int tracknum);
 void    wscene_free(WScene *s);
 void    wscene_tick(WScene *s);
-int     wscene_hit_object(void *ctx, int x, int y);
+int     wscene_hit_object(void *ctx, int x, int y, int *ox, int *oy);
 int     wscene_blocks(void *ctx, int x, int y);
 void    wscene_resolve_pickups(WScene *s, WPhys *p);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,

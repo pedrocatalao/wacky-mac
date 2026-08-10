@@ -87,6 +87,20 @@ static void whisker_respond(const PhysCtx *c, WPhys *p) {
     }
 }
 
+/* record which side the thing we hit is on, and whether it is nearer or
+ * farther than our own draw distance (0x7C) — the codes FUN_00022bf4 puts in
+ * the display-list entry and FUN_0002d3fc consumes. */
+static void note_bump(const PhysCtx *c, WPhys *p, int ox, int oy, int is_kart) {
+    int32_t dx = ox - p->posx, dy = oy - p->posy;
+    int32_t cq = c->tb->cosq[p->angle], sq = c->tb->sinq[p->angle];
+    int32_t z  = (cq * dx + sq * dy) >> 16;      /* depth   */
+    int32_t lx = (dy * cq - dx * sq) >> 16;      /* lateral */
+    p->bump_pending = 1;
+    p->bump_kart = is_kart;
+    p->bump_horz = lx > 0 ? 5 : (lx < 0 ? 4 : 3);
+    p->bump_vert = z > NOSE ? 1 : (z < NOSE ? 2 : 3);
+}
+
 /* probe one walk step at walk pos + nose offset; sets p->collide */
 static void probe_step(const PhysCtx *c, WPhys *p,
                        int32_t wx, int32_t wy, int32_t nx, int32_t ny) {
@@ -105,17 +119,21 @@ static void probe_step(const PhysCtx *c, WPhys *p,
     /* objects then other karts, Manhattan distance < 0xE (probe_step) */
     if (p->hop_state == 0 && c->col) {
         int px = wx + nx, py = wy + ny;
-        if (c->col->hit_object && c->col->hit_object(c->col->obj_ctx, px, py)) {
+        int ox = px, oy = py;
+        if (c->col->hit_object &&
+            c->col->hit_object(c->col->obj_ctx, px, py, &ox, &oy)) {
             p->object_hit = 1;
             p->collide = 2;
+            note_bump(c, p, ox, oy, 0);
             return;
         }
         if (c->col->hit_kart) {
-            int k = c->col->hit_kart(c->col->kart_ctx, px, py);
+            int k = c->col->hit_kart(c->col->kart_ctx, px, py, &ox, &oy);
             if (k) {
                 p->object_hit = 1;
                 p->collide = 3;
                 p->collide_kart = k - 1;
+                note_bump(c, p, ox, oy, 1);
             }
         }
     }
@@ -348,6 +366,27 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
     PhysCtx c = { t, tb, col };
     static const int rates[4] = { 0x28, 0x28, 0x24, 0x20 };
     int steer_rate = rates[detail_level & 3];
+
+    /* bump deflection (FUN_0002d3fc), applied before this tick's physics:
+     * turn 0x12 away from the side hit, step 1 unit along the new heading,
+     * and for kart hits shove the throttle by 0x28 depending on whether the
+     * other kart was nearer (boost, cap 0xBE) or farther (brake, floor 0) */
+    if (p->bump_pending) {
+        if (p->bump_horz == 5) p->angle = wrapa(p->angle - WHISK);
+        else                   p->angle = wrapa(p->angle + WHISK);
+        p->posx += tscale(tb->cosq[p->angle], 1);
+        p->posy += tscale(tb->sinq[p->angle], 1);
+        if (p->bump_kart) {
+            if (p->bump_vert == 2) {
+                p->throttle += 0x28;
+                if (p->throttle > 0xBE) p->throttle = 0xBE;
+            } else if (p->bump_vert == 1) {
+                p->throttle -= 0x28;
+                if (p->throttle < 0) p->throttle = 0;
+            }
+        }
+        p->bump_pending = 0;
+    }
 
     p->steer_l = 0; p->steer_r = 0;
     bool accel = in->accel, brake = in->brake, hop = in->hop;

@@ -294,7 +294,7 @@ void wai_kart_hit(void *ctx, int idx, int spin_state, int tick) {
 }
 
 /* collision probe: index+1 of an AI kart within Manhattan 0xE of (x,y) */
-int wai_hit_kart(void *ctx, int x, int y) {
+int wai_hit_kart(void *ctx, int x, int y, int *ox, int *oy) {
     const WAi *ai = ctx;
     if (!ai) return 0;
     for (int i = 1; i < 8; i++) {
@@ -302,7 +302,11 @@ int wai_hit_kart(void *ctx, int x, int y) {
         int dx = ai->k[i].x - x, dy = ai->k[i].y - y;
         if (dx < 0) dx = -dx;
         if (dy < 0) dy = -dy;
-        if (dx + dy < 0xE) return i + 1;
+        if (dx + dy < 0xE) {
+            if (ox) *ox = ai->k[i].x;
+            if (oy) *oy = ai->k[i].y;
+            return i + 1;
+        }
     }
     return 0;
 }
