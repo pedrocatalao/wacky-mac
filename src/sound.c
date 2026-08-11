@@ -117,7 +117,7 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
     WSound *s = ud;
     (void)ud;
     int32_t acc[4096];
-    int n = len / 2;
+    int n = len / 4;              /* stereo S16 frames */
     if (n > 4096) n = 4096;
     memset(acc, 0, (size_t)n * 4);
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -152,10 +152,11 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
         else if (v < -24576) v = -24576 + (v + 24576) / 4;
         if (v > 32767) v = 32767;
         if (v < -32768) v = -32768;
-        dst[i] = (int16_t)v;
+        dst[i * 2] = (int16_t)v;      /* same signal on both channels, */
+        dst[i * 2 + 1] = (int16_t)v;  /* like the original's mono card */
     }
-    if (len > n * 2) memset(stream + n * 2, 0, (size_t)(len - n * 2));
-    /* diagnostic: dump the mix when WW_MIXDUMP names a file */
+    if (len > n * 4) memset(stream + n * 4, 0, (size_t)(len - n * 4));
+    /* diagnostic: dump the mix (mono) when WW_MIXDUMP names a file */
     {
         static FILE *dumpf;
         static int tried;
@@ -164,7 +165,8 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
             const char *p = getenv("WW_MIXDUMP");
             if (p) dumpf = fopen(p, "wb");
         }
-        if (dumpf) fwrite(dst, 2, (size_t)n, dumpf);
+        if (dumpf)
+            for (int i = 0; i < n; i++) fwrite(&dst[i * 2], 2, 1, dumpf);
     }
 }
 
@@ -175,7 +177,7 @@ WSound *wsound_create(const WDat *dat) {
     SDL_zero(want);
     want.freq = 22050;
     want.format = AUDIO_S16SYS;
-    want.channels = 1;
+    want.channels = 2;
     want.samples = 1024;
     want.callback = mix_cb;
     want.userdata = s;
