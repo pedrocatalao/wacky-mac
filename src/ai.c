@@ -341,7 +341,7 @@ int wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base) {
     if (!rear) { k->looked = 0; return 0; }   /* re-arm */
     if (k->looked || !close_ok) return 0;
     k->looked = 1;
-    k->look_ticks = 0x14;
+    k->look_ticks = 6;      /* mild, hard held ~3 ticks, mild, done */
     k->look_base = base;
     return 1;
 }
@@ -352,7 +352,7 @@ int wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base) {
 int wai_kart_look(const WAi *ai, int i) {
     if (!ai || i < 1 || i > 7 || ai->k[i].look_ticks <= 0) return -1;
     int t = ai->k[i].look_ticks;
-    int step = (t > 0x11 || t <= 3) ? 0 : 1;
+    int step = (t == 6 || t == 1) ? 0 : 1;   /* rise, hold hard, ease back */
     return 8 + ai->k[i].look_base + step;
 }
 
@@ -362,18 +362,18 @@ int wai_kart_look(const WAi *ai, int i) {
 int wai_player_look_try(WAi *ai, int dir) {
     if (!ai || ai->plook_ticks > 0) return 0;
     ai->plook_dir = dir;
-    ai->plook_ticks = 0x14;
+    ai->plook_ticks = 6;
     return 1;
 }
 
-/* current lean frame for the player's head-turn (character SP frames:
- * 0/1 = left mild/strong, 2/3 = right), rising to the strong lean,
- * holding, then easing back like the AI's ticker; -1 when inactive */
+/* current CARS.SP frame for the player's head-turn: the position walker
+ * (states 6..9) goes mild -> HARD, holds ~3 ticks, eases back; frames
+ * 8/9 = look left / hard left, 10/11 = right / hard right. -1 = off. */
 int wai_player_look(const WAi *ai) {
     if (!ai || ai->plook_ticks <= 0) return -1;
     int t = ai->plook_ticks;
-    int step = (t > 0x11 || t <= 3) ? 0 : 1;
-    return (ai->plook_dir == 1 ? 0 : 2) + step;
+    int step = (t == 6 || t == 1) ? 0 : 1;
+    return (ai->plook_dir == 1 ? 8 : 10) + step;
 }
 
 void wai_set_view_frame(WAi *ai, int i, int frame) {
