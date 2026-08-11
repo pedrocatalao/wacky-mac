@@ -344,13 +344,12 @@ int main(int argc, char **argv) {
         bool fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_Z];
 
         bool ticked = false;
-        if (acc_ms >= TICK_MS) {             /* one tick per frame, 11.34 Hz */
-            if (intro_step(&player, &TB, scene)) {
-                acc_ms -= TICK_MS;
-                ticked = true;
-                continue;
-            }
-
+        /* one tick per frame, 11.34 Hz; the race-start sequence owns the tick
+         * until the light goes green, but the frame is still drawn */
+        if (acc_ms >= TICK_MS && intro_step(&player, &TB, scene)) {
+            acc_ms -= TICK_MS;
+            ticked = true;
+        } else if (acc_ms >= TICK_MS) {
             WPhysInput in = { accel, brake, left, right, hop };
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
             wphys_tick(&player, &track, &TB, &in, 1, &col);
@@ -430,7 +429,8 @@ int main(int argc, char **argv) {
             ticked = true;
         }
 
-        if (ticked || map_view) {
+        (void)ticked;   /* every frame is drawn; the tick only advances state */
+        {
             if (map_view) {
                 render_map_debug(&track, &player);
             } else {
