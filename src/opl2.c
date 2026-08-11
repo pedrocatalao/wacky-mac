@@ -1,10 +1,14 @@
-/* Compact OPL2 (YM3812) synthesiser — enough of the chip to play the game's
- * AdLib music: 9 two-operator channels, the four wave shapes, ADSR envelopes
- * with key-scaling, FM or additive connection, and operator feedback.
+/* OPL2 (YM3812) synthesiser — a proper emulation of the chip the game's
+ * KLM music was written for.
  *
- * Written against the published YM3812 register map so the KLM streams (which
- * are literally register writes) drive it the way the original hardware was
- * driven. Exponential/log tables follow the chip's 256-entry scheme.
+ * Follows the documented hardware behaviour: the 256-entry log-sin and
+ * exponential ROM tables, 10-bit phase with multiplier and vibrato, the
+ * envelope generator in 0.1875 dB steps with rate key-scaling, total level
+ * at 0.75 dB/step, KSL, tremolo, operator feedback averaging the last two
+ * outputs, the four wave shapes, and rhythm mode with the real phase-bit
+ * formulas for hi-hat, snare and cymbal plus the 23-bit noise LFSR.
+ *
+ * The core runs at the chip's native 49716 Hz; callers resample.
  */
 #include "opl2.h"
 
@@ -15,33 +19,72 @@
 #define OPS 18
 #define CHS 9
 
-static int16_t sintab[4][1024];
-static int     tabs_done;
+/* ---- ROM tables -------------------------------------------------------- */
+
+static uint16_t logsin_t[256];  /* -log2(sin) in 1/256 log2 units */
+static uint16_t exp_t[256];     /* (2^(i/256) - 1) * 1024 */
+static int      tabs_done;
 
 static void build_tables(void) {
     if (tabs_done) return;
-    for (int i = 0; i < 1024; i++) {
-        double s = sin((i + 0.5) * 2.0 * M_PI / 1024.0);
-        sintab[0][i] = (int16_t)(s * 4084.0);                    /* full sine   */
-        sintab[1][i] = i < 512 ? sintab[0][i] : 0;               /* half sine   */
-        sintab[2][i] = sintab[0][i & 511] > 0 ? sintab[0][i & 511]
-                                              : (int16_t)(-sintab[0][i & 511]);
-        sintab[3][i] = (i & 511) < 256 ? sintab[0][i & 255] : 0; /* pulse sine  */
+    for (int i = 0; i < 256; i++) {
+        logsin_t[i] = (uint16_t)lround(-log2(sin((i + 0.5) * M_PI / 512.0)) * 256.0);
+        exp_t[i] = (uint16_t)lround((exp2((double)i / 256.0) - 1.0) * 1024.0);
     }
     tabs_done = 1;
 }
 
+/* attenuated sine lookup: phase 0..1023, att in 1/256 log2 units ("logsin
+ * units"); returns the chip's 13-bit signed output */
+static int op_wave(int wave, uint32_t phase, uint32_t att) {
+    phase &= 1023;
+    int sign = 0;
+    uint32_t idx = phase & 255;
+    uint32_t half = phase & 512, quarter = phase & 256;
+    if (quarter) idx = 255 - idx;
+    uint32_t val;
+    switch (wave) {
+    default:
+    case 0:                                   /* full sine */
+        val = logsin_t[idx];
+        sign = half != 0;
+        break;
+    case 1:                                   /* half sine */
+        if (half) return 0;
+        val = logsin_t[idx];
+        break;
+    case 2:                                   /* absolute sine */
+        val = logsin_t[idx];
+        break;
+    case 3:                                   /* quarter pulses */
+        if (quarter) return 0;
+        val = logsin_t[idx];
+        break;
+    }
+    uint32_t total = val + att;
+    if (total > 8191) total = 8191;           /* below audible floor */
+    int out = ((exp_t[total & 255] + 1024) << 1) >> (total >> 8);
+    return sign ? -out : out;
+}
+
+/* ---- operator / channel state ------------------------------------------ */
+
+enum { EG_OFF, EG_ATTACK, EG_DECAY, EG_SUSTAIN, EG_RELEASE };
+
 typedef struct {
+    /* registers */
     uint8_t am, vib, egt, ksr, mult;   /* 0x20 */
     uint8_t ksl, tl;                   /* 0x40 */
     uint8_t ar, dr;                    /* 0x60 */
     uint8_t sl, rr;                    /* 0x80 */
     uint8_t wave;                      /* 0xE0 */
     /* runtime */
-    uint32_t phase;
-    double   env;                      /* 0..1 linear amplitude */
-    int      stage;                    /* 0 off, 1 attack, 2 decay, 3 sustain, 4 release */
-    int16_t  out, prev;
+    uint32_t phase;                    /* 19-bit phase counter */
+    int32_t  env;                      /* 0 (loud) .. 511 (silent) */
+    int      stage;
+    int32_t  out0, out1;               /* last two outputs (feedback) */
+    int      ksl_att;                  /* cached KSL attenuation, env units */
+    int      ksv;                      /* cached key-scale value for rates */
 } Op;
 
 typedef struct {
@@ -52,24 +95,34 @@ typedef struct {
 struct WOpl {
     Op  op[OPS];
     Ch  ch[CHS];
-    int rate;
-    uint8_t  bd;      /* register 0xBD: rhythm enable + key bits  */
-    uint32_t lfsr;    /* noise generator for snare/hihat/cymbal   */
+    int rate;                          /* informational; core is 49716 Hz */
+    uint8_t  bd;
+    uint32_t noise;                    /* 23-bit LFSR */
+    uint32_t eg_cnt;                   /* envelope timer */
+    uint32_t lfo_am_cnt, lfo_vib_cnt;
+    uint8_t  dam, dvb;                 /* depth bits from 0xBD */
+    int      tremolo;                  /* current AM attenuation, env units */
+    int      vib_step;
 };
 
-/* operator index for (channel, slot) — the chip's irregular layout */
+/* channel -> operator pair (the chip's slot layout) */
 static const int OPMAP[CHS][2] = {
     {0,3},{1,4},{2,5},{6,9},{7,10},{8,11},{12,15},{13,16},{14,17}
 };
-/* register offset -> operator */
 static const int REG2OP[32] = {
-    0,1,2,3,4,5,-1,-1, 6,7,8,9,10,11,-1,-1, 12,13,14,15,16,17,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1
+    0,1,2,3,4,5,-1,-1, 6,7,8,9,10,11,-1,-1, 12,13,14,15,16,17,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1
 };
+/* operator -> owning channel, for frequency-derived values */
+static const int OP2CH[OPS] = {0,1,2,0,1,2,3,4,5,3,4,5,6,7,8,6,7,8};
+
+/* KSL base attenuation per fnum>>6, in 0.75 dB units (hardware table) */
+static const int KSL_BASE[16] = {0,24,32,37,40,43,45,47,48,50,51,52,53,54,55,56};
 
 WOpl *wopl_create(int rate) {
     build_tables();
     WOpl *o = calloc(1, sizeof *o);
-    if (o) { o->rate = rate; o->lfsr = 1; }
+    if (o) { o->rate = rate; o->noise = 1; }
     return o;
 }
 
@@ -80,45 +133,58 @@ void wopl_reset(WOpl *o) {
     int r = o->rate;
     memset(o, 0, sizeof *o);
     o->rate = r;
-    o->lfsr = 1;
+    o->noise = 1;
+    for (int i = 0; i < OPS; i++) { o->op[i].env = 511; o->op[i].stage = EG_OFF; }
 }
 
-/* attack/decay/release rates: the chip's rate index -> per-sample increment */
-static double env_rate(int rate_idx, int srate, int attack) {
-    if (rate_idx == 0) return 0.0;
-    /* the chip's envelope times roughly halve per rate step; rate 15 is
-     * near-instant, rate 1 is seconds long */
-    double ms = (attack ? 2400.0 : 9600.0) / pow(2.0, rate_idx / 2.0);
-    if (ms < 0.2) ms = 0.2;
-    return 1000.0 / (ms * srate);
+/* refresh an operator's cached frequency-derived values */
+static void op_refresh(WOpl *o, int oi) {
+    Op *p = &o->op[oi];
+    const Ch *c = &o->ch[OP2CH[oi]];
+    int ks = (c->block << 1) | (c->fnum >> 9);
+    p->ksv = p->ksr ? ks : ks >> 2;
+    int ksl = KSL_BASE[c->fnum >> 6] - 8 * (7 - c->block);
+    if (ksl < 0) ksl = 0;
+    /* ksl bits: off, 3 dB/oct, 1.5 dB/oct, 6 dB/oct -> shift 3/1/2/0 on the
+     * 0.75 dB base gives env units (0.1875 dB) after <<2 */
+    static const int KSL_SHIFT[4] = {31, 1, 2, 0};
+    p->ksl_att = p->ksl ? (ksl << 2) >> KSL_SHIFT[p->ksl] : 0;
 }
 
-static void op_key(Op *p, int on) {
-    if (on) { p->stage = 1; p->phase = 0; }
-    else if (p->stage != 0) p->stage = 4;
+static void op_key_on(WOpl *o, int oi) {
+    Op *p = &o->op[oi];
+    if (p->stage == EG_OFF || p->stage == EG_RELEASE) {
+        p->phase = 0;
+        p->stage = EG_ATTACK;
+        if (p->ar >= 15) { p->env = 0; p->stage = EG_DECAY; }
+    }
+}
+
+static void op_key_off(WOpl *o, int oi) {
+    Op *p = &o->op[oi];
+    if (p->stage != EG_OFF) p->stage = EG_RELEASE;
 }
 
 void wopl_write(WOpl *o, uint8_t reg, uint8_t val) {
     if (!o) return;
     if (reg == 0xBD) {
-        /* rhythm mode: bit5 enable, bits 4..0 key BD/SD/TT/CY/HH */
         uint8_t was = o->bd;
         o->bd = val;
+        o->dam = (val >> 7) & 1;
+        o->dvb = (val >> 6) & 1;
+        if (!(val & 0x20)) return;
         uint8_t rise = (uint8_t)(val & ~was), fall = (uint8_t)(was & ~val);
-        struct { uint8_t bit; int op1, op2; } K[5] = {
-            {0x10, 12, 15},   /* bass drum: both ops of channel 6 */
-            {0x08, 16, -1},   /* snare  */
-            {0x04, 14, -1},   /* tomtom */
-            {0x02, 17, -1},   /* cymbal */
-            {0x01, 13, -1},   /* hi-hat */
+        static const struct { uint8_t bit; int op1, op2; } K[5] = {
+            {0x10, 12, 15}, {0x08, 16, -1}, {0x04, 14, -1},
+            {0x02, 17, -1}, {0x01, 13, -1},
         };
         for (int i = 0; i < 5; i++) {
             if (rise & K[i].bit) {
-                op_key(&o->op[K[i].op1], 1);
-                if (K[i].op2 >= 0) op_key(&o->op[K[i].op2], 1);
+                op_key_on(o, K[i].op1);
+                if (K[i].op2 >= 0) op_key_on(o, K[i].op2);
             } else if (fall & K[i].bit) {
-                op_key(&o->op[K[i].op1], 0);
-                if (K[i].op2 >= 0) op_key(&o->op[K[i].op2], 0);
+                op_key_off(o, K[i].op1);
+                if (K[i].op2 >= 0) op_key_off(o, K[i].op2);
             }
         }
         return;
@@ -129,9 +195,12 @@ void wopl_write(WOpl *o, uint8_t reg, uint8_t val) {
         if (oi < 0) return;
         Op *p = &o->op[oi];
         switch (grp) {
-        case 0x20: p->am = val >> 7; p->vib = (val >> 6) & 1; p->egt = (val >> 5) & 1;
-                   p->ksr = (val >> 4) & 1; p->mult = val & 15; break;
-        case 0x40: p->ksl = val >> 6; p->tl = val & 63; break;
+        case 0x20:
+            p->am = val >> 7; p->vib = (val >> 6) & 1; p->egt = (val >> 5) & 1;
+            p->ksr = (val >> 4) & 1; p->mult = val & 15;
+            op_refresh(o, oi);
+            break;
+        case 0x40: p->ksl = val >> 6; p->tl = val & 63; op_refresh(o, oi); break;
         case 0x60: p->ar = val >> 4; p->dr = val & 15; break;
         case 0x80: p->sl = val >> 4; p->rr = val & 15; break;
         case 0xE0: p->wave = val & 3; break;
@@ -141,21 +210,24 @@ void wopl_write(WOpl *o, uint8_t reg, uint8_t val) {
     if (reg >= 0xA0 && reg <= 0xA8) {
         Ch *c = &o->ch[reg - 0xA0];
         c->fnum = (uint16_t)((c->fnum & 0x300) | val);
+        op_refresh(o, OPMAP[reg - 0xA0][0]);
+        op_refresh(o, OPMAP[reg - 0xA0][1]);
     } else if (reg >= 0xB0 && reg <= 0xB8) {
-        Ch *c = &o->ch[reg - 0xB0];
+        int chn = reg - 0xB0;
+        Ch *c = &o->ch[chn];
         c->fnum = (uint16_t)((c->fnum & 0xFF) | ((val & 3) << 8));
         c->block = (val >> 2) & 7;
-        /* rhythm mode: B0 keyon is ignored on channels 6-8 */
-        if ((o->bd & 0x20) && reg >= 0xB6) return;
+        op_refresh(o, OPMAP[chn][0]);
+        op_refresh(o, OPMAP[chn][1]);
+        /* rhythm mode owns the keying of channels 6-8 */
+        if ((o->bd & 0x20) && chn >= 6) return;
         int on = (val >> 5) & 1;
         if (on && !c->keyon) {
-            for (int s = 0; s < 2; s++) {
-                Op *p = &o->op[OPMAP[reg - 0xB0][s]];
-                p->stage = 1;
-                p->phase = 0;
-            }
+            op_key_on(o, OPMAP[chn][0]);
+            op_key_on(o, OPMAP[chn][1]);
         } else if (!on && c->keyon) {
-            for (int s = 0; s < 2; s++) o->op[OPMAP[reg - 0xB0][s]].stage = 4;
+            op_key_off(o, OPMAP[chn][0]);
+            op_key_off(o, OPMAP[chn][1]);
         }
         c->keyon = (uint8_t)on;
     } else if (reg >= 0xC0 && reg <= 0xC8) {
@@ -165,106 +237,174 @@ void wopl_write(WOpl *o, uint8_t reg, uint8_t val) {
     }
 }
 
-static void env_step(Op *p, int srate) {
+/* ---- envelope generator ------------------------------------------------ */
+
+/* per-step increment patterns for the two low rate bits */
+static const int EG_PAT[4][8] = {
+    {0,1,0,1,0,1,0,1}, {0,1,0,1,1,1,0,1}, {0,1,1,1,0,1,1,1}, {0,1,1,1,1,1,1,1},
+};
+
+/* advance one operator's envelope; called once per sample */
+static void env_step(WOpl *o, Op *p) {
+    int r4, target;
     switch (p->stage) {
-    case 1: {
-        double r = env_rate(p->ar, srate, 1);
-        if (p->ar >= 15) p->env = 1.0;
-        else p->env += r;
-        if (p->env >= 1.0) { p->env = 1.0; p->stage = 2; }
+    case EG_ATTACK:  r4 = p->ar; break;
+    case EG_DECAY:   r4 = p->dr; break;
+    case EG_SUSTAIN:
+        if (p->egt) return;                    /* held until key-off */
+        r4 = p->rr;
         break;
+    case EG_RELEASE: r4 = p->rr; break;
+    default: return;
     }
-    case 2: {
-        double sl = 1.0 - p->sl / 15.0;
-        p->env -= env_rate(p->dr, srate, 0);
-        if (p->env <= sl) { p->env = sl; p->stage = 3; }
-        break;
+    if (r4 == 0) return;
+    int rate = r4 * 4 + p->ksv;
+    if (rate > 63) rate = 63;
+    int shift = 12 - (rate >> 2);
+    int inc;
+    if (shift > 0) {
+        if (o->eg_cnt & ((1u << shift) - 1)) return;
+        inc = EG_PAT[rate & 3][(o->eg_cnt >> shift) & 7];
+    } else {
+        /* rates 48+: one to eight units every sample */
+        inc = (1 << (-shift)) + EG_PAT[rate & 3][o->eg_cnt & 7] * (1 << (-shift) >> 1);
+        if (inc < 1) inc = 1;
     }
-    case 3:
-        if (!p->egt) {              /* percussive: keep decaying */
-            p->env -= env_rate(p->rr, srate, 0);
-            if (p->env <= 0) { p->env = 0; p->stage = 0; }
-        }
-        break;
-    case 4:
-        p->env -= env_rate(p->rr, srate, 0);
-        if (p->env <= 0) { p->env = 0; p->stage = 0; }
-        break;
+    if (p->stage == EG_ATTACK) {
+        if (rate >= 60) { p->env = 0; }
+        else p->env += (~p->env * inc) >> 3;
+        if (p->env <= 0) { p->env = 0; p->stage = EG_DECAY; }
+        return;
     }
-    if (p->env < 0) p->env = 0;
+    p->env += inc;
+    if (p->env > 511) p->env = 511;
+    if (p->stage == EG_DECAY) {
+        target = p->sl == 15 ? 511 : p->sl << 4;   /* 3 dB per SL step */
+        if (p->env >= target) { p->env = target; p->stage = EG_SUSTAIN; }
+    } else if (p->stage == EG_RELEASE && p->env >= 511) {
+        p->stage = EG_OFF;
+    }
 }
 
-static int16_t op_run(WOpl *o, Op *p, uint32_t inc, int16_t mod) {
-    p->phase += inc;
-    uint32_t ph = ((p->phase >> 10) + (uint32_t)(mod >> 1)) & 1023;
-    int16_t s = sintab[p->wave][ph];
-    double att = pow(10.0, -(p->tl * 0.75) / 20.0);   /* total level, 0.75 dB/step */
-    env_step(p, o->rate);
-    return (int16_t)(s * p->env * att);
+/* total attenuation for output, in logsin units (1/256 log2) */
+static uint32_t op_att(const WOpl *o, const Op *p) {
+    int env = p->env + (p->tl << 2) + p->ksl_att;
+    if (p->am) env += o->dam ? o->tremolo : o->tremolo >> 2;
+    if (env > 511) env = 511;
+    return (uint32_t)env << 3;
 }
 
-static const double MUL[16] = {0.5,1,2,3,4,5,6,7,8,9,10,10,12,12,15,15};
-
-static uint32_t ch_inc(const WOpl *o, const Ch *ch, const Op *p) {
-    double base = (double)ch->fnum * (1 << ch->block) * 49716.0 / 1048576.0;
-    return (uint32_t)(base * MUL[p->mult] / o->rate * 1024.0 * 1024.0);
+/* phase increment with vibrato (applies to the fnum high bits) */
+static uint32_t op_phase_inc(const WOpl *o, const Op *p, const Ch *c) {
+    static const int MULT2[16] = {1,2,4,6,8,10,12,14,16,18,20,20,24,24,30,30};
+    int fnum = c->fnum;
+    if (p->vib) {
+        int fh = fnum >> 7;
+        int step = o->vib_step;
+        int delta = (step & 3) == 0 ? 0 : (step & 1 ? fh >> 1 : fh);
+        if (!o->dvb) delta >>= 1;
+        fnum += (step & 4) ? -delta : delta;
+    }
+    return ((uint32_t)fnum * MULT2[p->mult] << c->block) >> 2;
 }
 
-/* percussion operator: envelope + amplitude as usual, but the waveform is
- * replaced by the noise generator (snare/hihat/cymbal are noise-based on
- * the real chip; the tom-tom stays tonal and uses op_run) */
-static int16_t op_noise(WOpl *o, Op *p, uint32_t inc) {
-    p->phase += inc;
-    int16_t s = (o->lfsr & 1) ? 4084 : -4084;
-    double att = pow(10.0, -(p->tl * 0.75) / 20.0);
-    env_step(p, o->rate);
-    return (int16_t)(s * p->env * att * 0.5);
+/* run one operator; pm is the 10-bit-domain phase modulation input */
+static int op_run(WOpl *o, Op *p, const Ch *c, int pm) {
+    env_step(o, p);
+    p->phase = (p->phase + op_phase_inc(o, p, c)) & 0x7FFFF;
+    if (p->stage == EG_OFF) return 0;
+    return op_wave(p->wave, (p->phase >> 9) + (uint32_t)pm, op_att(o, p));
+}
+
+/* rhythm voices: the chip derives their waveform phases from the raw phase
+ * bits of operators 13 (hi-hat slot) and 17 (cymbal slot) plus noise */
+static uint32_t rhythm_phase(WOpl *o, int voice) {
+    uint32_t ph13 = o->op[13].phase >> 9, ph17 = o->op[17].phase >> 9;
+    int noise = (int)(o->noise & 1);
+    int res1 = ((ph13 >> 2 ^ ph13 >> 7) & 1) | ((ph13 >> 3) & 1);
+    int res2 = ((ph17 >> 3 ^ ph17 >> 5) & 1);
+    switch (voice) {
+    case 0: {                                   /* hi-hat */
+        uint32_t phase = res1 ? (0x200 | (0xD0 >> 2)) : 0xD0;
+        if (res2) phase = 0x200 | (0xD0 >> 2);
+        if (phase & 0x200) { if (noise) phase = 0x200 | 0xD0; }
+        else               { if (noise) phase = 0xD0 >> 2; }
+        return phase;
+    }
+    case 1: {                                   /* snare */
+        uint32_t phase = ((ph13 >> 8) & 1) ? 0x200 : 0x100;
+        if (noise) phase ^= 0x100;
+        return phase;
+    }
+    default:                                    /* cymbal */
+        return (res1 | res2) ? 0x300 : 0x100;
+    }
 }
 
 void wopl_render(WOpl *o, int16_t *out, int n) {
     if (!o) { memset(out, 0, (size_t)n * 2); return; }
     int rhythm = o->bd & 0x20;
     for (int i = 0; i < n; i++) {
+        o->eg_cnt++;
+        /* tremolo: 210-sample steps over a 27-step triangle (~3.7 Hz),
+         * 0..26 envelope units = 4.8 dB */
+        if (++o->lfo_am_cnt >= 210 * 54) o->lfo_am_cnt = 0;
+        int am_step = (int)(o->lfo_am_cnt / 210);
+        o->tremolo = am_step < 27 ? am_step : 53 - am_step;
+        /* vibrato: 1024-sample steps through 8 positions (~6.1 Hz) */
+        if (++o->lfo_vib_cnt >= 1024 * 8) o->lfo_vib_cnt = 0;
+        o->vib_step = (int)(o->lfo_vib_cnt >> 10);
+        /* noise LFSR, clocked every sample */
+        uint32_t nbit = ((o->noise >> 14) ^ o->noise) & 1;
+        o->noise = (o->noise >> 1) | (nbit << 22);
+
         int acc = 0;
-        /* clock the 23-bit noise LFSR once per sample */
-        uint32_t fb = ((o->lfsr >> 14) ^ o->lfsr) & 1;
-        o->lfsr = (o->lfsr >> 1) | (fb << 22);
-        if (!o->lfsr) o->lfsr = 1;
         int melodic = rhythm ? 6 : CHS;
         for (int c = 0; c < melodic; c++) {
             Ch *ch = &o->ch[c];
             Op *m = &o->op[OPMAP[c][0]], *k = &o->op[OPMAP[c][1]];
-            if (m->stage == 0 && k->stage == 0) continue;
-            uint32_t incm = ch_inc(o, ch, m), inck = ch_inc(o, ch, k);
-            int16_t fbmod = ch->fb ? (int16_t)((m->prev + m->out) >> (9 - ch->fb)) : 0;
-            int16_t mo = op_run(o, m, incm, fbmod);
-            m->prev = m->out;
-            m->out = mo;
-            if (ch->cnt) {                    /* additive */
-                acc += mo + op_run(o, k, inck, 0);
-            } else {                          /* FM */
-                acc += op_run(o, k, inck, mo);
-            }
+            if (m->stage == EG_OFF && k->stage == EG_OFF) continue;
+            int fb = ch->fb ? (int)((m->out0 + m->out1) >> (9 - ch->fb)) : 0;
+            int mo = op_run(o, m, ch, fb);
+            m->out1 = m->out0;
+            m->out0 = mo;
+            if (ch->cnt) acc += mo + op_run(o, k, ch, 0);
+            else         acc += op_run(o, k, ch, mo);
         }
         if (rhythm) {
-            /* bass drum: channel 6 as a normal FM pair, keyed via 0xBD */
+            /* bass drum: normal 2-op FM on channel 6, double weight */
             Ch *c6 = &o->ch[6];
             Op *m = &o->op[12], *k = &o->op[15];
-            if (m->stage || k->stage) {
-                int16_t fbmod = c6->fb ? (int16_t)((m->prev + m->out) >> (9 - c6->fb)) : 0;
-                int16_t mo = op_run(o, m, ch_inc(o, c6, m), fbmod);
-                m->prev = m->out;
-                m->out = mo;
-                acc += op_run(o, k, ch_inc(o, c6, k), mo) * 2;
+            if (m->stage != EG_OFF || k->stage != EG_OFF) {
+                int fb = c6->fb ? (int)((m->out0 + m->out1) >> (9 - c6->fb)) : 0;
+                int mo = op_run(o, m, c6, fb);
+                m->out1 = m->out0;
+                m->out0 = mo;
+                acc += (c6->cnt ? op_run(o, k, c6, 0) : op_run(o, k, c6, mo)) * 2;
             }
-            /* hi-hat (op13) and snare (op16) run off channel 7's frequency,
-             * tom-tom (op14, tonal) and cymbal (op17) off channel 8's */
+            /* hi-hat, snare, tom, cymbal — phases per the chip's formulas */
             Op *hh = &o->op[13], *sd = &o->op[16];
             Op *tt = &o->op[14], *cy = &o->op[17];
-            if (hh->stage) acc += op_noise(o, hh, ch_inc(o, &o->ch[7], hh));
-            if (sd->stage) acc += op_noise(o, sd, ch_inc(o, &o->ch[7], sd)) * 2;
-            if (tt->stage) acc += op_run(o, tt, ch_inc(o, &o->ch[8], tt), 0) * 2;
-            if (cy->stage) acc += op_noise(o, cy, ch_inc(o, &o->ch[8], cy));
+            if (hh->stage != EG_OFF) {
+                env_step(o, hh);
+                hh->phase = (hh->phase + op_phase_inc(o, hh, &o->ch[7])) & 0x7FFFF;
+                if (hh->stage != EG_OFF)
+                    acc += op_wave(hh->wave, rhythm_phase(o, 0), op_att(o, hh)) * 2;
+            }
+            if (sd->stage != EG_OFF) {
+                env_step(o, sd);
+                sd->phase = (sd->phase + op_phase_inc(o, sd, &o->ch[7])) & 0x7FFFF;
+                if (sd->stage != EG_OFF)
+                    acc += op_wave(sd->wave, rhythm_phase(o, 1), op_att(o, sd)) * 2;
+            }
+            if (tt->stage != EG_OFF)
+                acc += op_run(o, tt, &o->ch[8], 0) * 2;
+            if (cy->stage != EG_OFF) {
+                env_step(o, cy);
+                cy->phase = (cy->phase + op_phase_inc(o, cy, &o->ch[8])) & 0x7FFFF;
+                if (cy->stage != EG_OFF)
+                    acc += op_wave(cy->wave, rhythm_phase(o, 2), op_att(o, cy)) * 2;
+            }
         }
         if (acc > 32767) acc = 32767;
         if (acc < -32768) acc = -32768;

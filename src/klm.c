@@ -43,13 +43,19 @@ static const int OPREG[18] = {0,1,2,3,4,5,8,9,0xA,0xB,0xC,0xD,
 /* rhythm key bit in register 0xBD per channel (DAT_0006455c) */
 static const int BDBIT[KCH] = {0,0,0,0,0,0,0x10,0x08,0x04,0x02,0x01};
 
+#define OPL_RATE 49716    /* the chip's native sample rate */
+
 struct WKlm {
     WOpl *opl;
-    int rate;
+    int rate;                       /* output rate */
     const uint8_t *data;
     uint32_t len, songoff, pos;
     int tempo, wait, playing;
-    int samples_per_tick, sample_cnt;
+    /* sequencer clock and output resampler, both 16.16 fixed point */
+    int64_t  tick_rem_fp;           /* chip samples until the next tick */
+    uint32_t tick_len_fp;
+    uint32_t rs_frac, rs_step;
+    int16_t  rs_s0, rs_s1;          /* newest / previous chip samples */
     /* driver state */
     int gvol;                       /* DAT_00064570 master music volume */
     int opvol[18];                  /* DAT_0009154c scaled per-op volume */
@@ -183,7 +189,7 @@ static void drv_rekey(WKlm *k, int ch) {
 WKlm *wklm_create(int rate) {
     WKlm *k = calloc(1, sizeof *k);
     if (!k) return NULL;
-    k->opl = wopl_create(rate);
+    k->opl = wopl_create(OPL_RATE);
     if (!k->opl) { free(k); return NULL; }
     k->rate = rate;
     k->gvol = 0xFF;
@@ -213,9 +219,11 @@ bool wklm_start(WKlm *k, const uint8_t *data, uint32_t len) {
     k->pos = songoff;
     k->tempo = tempo;
     k->wait = 0;
-    k->samples_per_tick = k->rate / tempo;
-    if (k->samples_per_tick < 1) k->samples_per_tick = 1;
-    k->sample_cnt = 0;
+    k->tick_len_fp = (uint32_t)(((uint64_t)OPL_RATE << 16) / tempo);
+    k->tick_rem_fp = 0;
+    k->rs_step = (uint32_t)(((uint64_t)OPL_RATE << 16) / k->rate);
+    k->rs_frac = 0;
+    k->rs_s0 = k->rs_s1 = 0;
     wopl_reset(k->opl);
     drv_init(k);
     k->playing = 1;
@@ -261,18 +269,29 @@ static void seq_tick(WKlm *k) {
     if (k->wait > 0) k->wait--;
 }
 
+/* one sample at the chip rate, ticking the sequencer on schedule */
+static int16_t chip_sample(WKlm *k) {
+    if (k->tick_rem_fp <= 0) {
+        seq_tick(k);
+        k->tick_rem_fp += k->tick_len_fp;
+    }
+    k->tick_rem_fp -= 1 << 16;
+    int16_t s;
+    wopl_render(k->opl, &s, 1);
+    return s;
+}
+
+/* linear resample 49716 Hz -> output rate */
 void wklm_render(WKlm *k, int16_t *out, int n) {
     if (!k || !k->playing) { memset(out, 0, (size_t)n * 2); return; }
-    int done = 0;
-    while (done < n) {
-        if (k->sample_cnt <= 0) {
-            seq_tick(k);
-            k->sample_cnt = k->samples_per_tick;
+    for (int i = 0; i < n; i++) {
+        k->rs_frac += k->rs_step;
+        while (k->rs_frac >= 1 << 16) {
+            k->rs_frac -= 1 << 16;
+            k->rs_s1 = k->rs_s0;
+            k->rs_s0 = chip_sample(k);
         }
-        int step = n - done;
-        if (step > k->sample_cnt) step = k->sample_cnt;
-        wopl_render(k->opl, out + done, step);
-        k->sample_cnt -= step;
-        done += step;
+        out[i] = (int16_t)(k->rs_s1 +
+                 (((int)k->rs_s0 - k->rs_s1) * (int)k->rs_frac >> 16));
     }
 }
