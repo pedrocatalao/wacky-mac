@@ -220,7 +220,7 @@ void wai_kart_hit(void *ctx, int idx, int spin_state, int tick);
 void wai_kart_ram(WAi *ai, int idx);
 int  wai_kart_render(WAi *ai, int i, int *x, int *y, int *compass, int *frame);
 void wai_set_view_frame(WAi *ai, int i, int frame);
-int  wai_kart_try_look(WAi *ai, int i, int base);
+int  wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base);
 int  wai_kart_look(const WAi *ai, int i);
 
 /* ---- Weapons / projectiles (src/weapons.c) ---- */

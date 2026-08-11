@@ -324,13 +324,18 @@ void wai_kart_ram(WAi *ai, int idx) {
 }
 
 /* remember the frame the renderer chose, so a spin starts from it */
-/* passing gag state: each opponent looks at the player (its lean pair,
- * toward the passing side) and shouts its voice once per race */
-int wai_kart_try_look(WAi *ai, int i, int base) {
-    if (!ai || i < 1 || i > 7 || ai->k[i].looked) return 0;
-    ai->k[i].looked = 1;
-    ai->k[i].look_ticks = 0x14;
-    ai->k[i].look_base = base;
+/* passing gag state (arming: the per-viewer flag is set while the kart
+ * shows its rear-view frame - the player is right behind it - and the
+ * latch clears once the view angle changes, so the gag re-fires on every
+ * overtake approach, not once per race) */
+int wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base) {
+    if (!ai || i < 1 || i > 7) return 0;
+    struct AiKart *k = &ai->k[i];
+    if (!rear) { k->looked = 0; return 0; }   /* re-arm */
+    if (k->looked || !close_ok) return 0;
+    k->looked = 1;
+    k->look_ticks = 0x14;
+    k->look_base = base;
     return 1;
 }
 
