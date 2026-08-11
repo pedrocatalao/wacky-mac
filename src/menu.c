@@ -21,7 +21,7 @@
 enum Flow {
     FL_LOGO_APOGEE, FL_LOGO_BEAVIS, FL_TITLE,
     FL_MAIN, FL_CLASS, FL_LAPS, FL_CAR, FL_CUP,
-    FL_PREVIEW, FL_RACE, FL_RESULTS, FL_PODIUM,
+    FL_PREVIEW, FL_RACE, FL_RESULTS, FL_BOARD, FL_PODIUM,
 };
 
 #define KART_W 38
@@ -54,7 +54,19 @@ struct WMenu {
     /* handoff to the race loop */
     int race_request;
     int quit;
+    char cur_song[16];      /* dedupe so screen changes don't restart music */
 };
+
+/* the original keeps a song playing across related screens; only start a
+ * different one (music placement per the preloaded slot table at 0x7c648:
+ * MAINMENU, LEADRBRD, GAMEOVER, SPACEY, ASHES) */
+static void menu_music(WMenu *m, const char *base, int loop) {
+    /* looped songs carry across screens; jingles always retrigger */
+    if (loop && strcmp(m->cur_song, base) == 0) return;
+    snprintf(m->cur_song, sizeof m->cur_song, "%s", base);
+    if (loop) wsound_music(m->dat, base);
+    else wsound_music_once(m->dat, base);
+}
 
 static const char *CHAR_NAME[8] = {
     "UNO", "SULTAN", "MORRIS", "PEGGLES", "RAZER", "RINGO", "BLOMBO", "TIGI",
@@ -206,37 +218,48 @@ static void enter(WMenu *m, int state) {
     switch (state) {
     case FL_LOGO_APOGEE:
         load_bg(m, "APOG1.PCX");
-        wsound_music(m->dat, "APOGEE");
+        menu_music(m, "APOGEE", 0);            /* one-shot fanfare */
         break;
     case FL_LOGO_BEAVIS:
         load_bg(m, "BEAVIS.PCX");
+        menu_music(m, "MAINMENU", 1);          /* starts here, not at title */
         break;
     case FL_TITLE:
         load_bg(m, "WINTRO.PCX");
-        wsound_music(m->dat, "MAINMENU");
+        menu_music(m, "MAINMENU", 1);
         break;
     case FL_MAIN:
     case FL_CLASS:
     case FL_LAPS:
-    case FL_CUP:
     case FL_CAR:
         load_bg(m, "ORDER.PCX");
+        menu_music(m, "MAINMENU", 1);
+        break;
+    case FL_CUP:
+        load_bg(m, "ORDER.PCX");
+        menu_music(m, "ASHES", 1);             /* the select boards' song */
         break;
     case FL_PREVIEW: {
         char name[16];
         snprintf(name, sizeof name, "SHRINK%d.PCX",
                  m->cup * 5 + m->race_idx + 1);
         if (!load_bg(m, name)) load_bg(m, "ORDER.PCX");
-        wsound_music_stop();
-        break;
+        break;                                 /* music keeps playing */
     }
     case FL_RESULTS:
         load_bg(m, "ORDER.PCX");
-        wsound_music(m->dat, "LEADRBRD");
+        menu_music(m, "ASHES", 1);             /* points screen (FUN_0002bff0) */
         break;
+    case FL_BOARD: {
+        char name[16];
+        snprintf(name, sizeof name, "SB%d.PCX", m->cup + 1);
+        if (!load_bg(m, name)) load_bg(m, "ORDER.PCX");
+        menu_music(m, "LEADRBRD", 0);          /* one-shot (FUN_0002e4b8) */
+        break;
+    }
     case FL_PODIUM:
         load_bg(m, "WIN.PCX");
-        wsound_music(m->dat, "GAMEOVER");
+        menu_music(m, "LEADRBRD", 0);
         break;
     }
 }
@@ -278,6 +301,7 @@ bool wmenu_race_request(WMenu *m, int *track, int *laps, int *character) {
     *laps = m->laps;
     *character = m->character;
     m->state = FL_RACE;
+    m->cur_song[0] = 0;            /* the race loop owns the music now */
     return true;
 }
 
@@ -300,7 +324,6 @@ void wmenu_race_done(WMenu *m, const int place_of_kart[8]) {
 void wmenu_race_aborted(WMenu *m) {
     if (!m) return;
     enter(m, FL_MAIN);
-    wsound_music(m->dat, "MAINMENU");
 }
 
 /* character of a kart index, mirroring the scene renderer's swap */
@@ -364,6 +387,9 @@ void wmenu_key(WMenu *m, int sym) {
         else m->race_request = 1;
         break;
     case FL_RESULTS:
+        if (fire || sym == SDLK_ESCAPE) enter(m, FL_BOARD);
+        break;
+    case FL_BOARD:
         if (fire || sym == SDLK_ESCAPE) {
             if (m->race_idx < 4) {
                 m->race_idx++;
@@ -375,7 +401,6 @@ void wmenu_key(WMenu *m, int sym) {
         break;
     case FL_PODIUM:
         enter(m, FL_MAIN);
-        wsound_music(m->dat, "MAINMENU");
         break;
     }
 }
@@ -438,6 +463,9 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
     case FL_PREVIEW:
         if ((m->frame / 30) & 1)
             wtext_c(m, fb, "PRESS FIRE", 4, 1);
+        break;
+    case FL_BOARD:
+        /* the SB cup board (FUN_0002e4b8) is self-captioned; any key moves on */
         break;
     case FL_RESULTS: {
         wtext_c(m, fb, "POINTS", 4, 0);

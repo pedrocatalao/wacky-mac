@@ -11,8 +11,9 @@ typedef struct WKlm WKlm;
 
 WKlm *wklm_create(int rate);
 void  wklm_free(WKlm *k);
-/* start a song; data must stay valid while it plays (it is read in place) */
-bool  wklm_start(WKlm *k, const uint8_t *data, uint32_t len);
+/* start a song; data must stay valid while it plays (it is read in place).
+ * loop=0 stops at the terminal 0xFF like the original's one-shot jingles */
+bool  wklm_start(WKlm *k, const uint8_t *data, uint32_t len, int loop);
 void  wklm_stop(WKlm *k);
 /* mono S16 at the create() rate; silence when stopped */
 void  wklm_render(WKlm *k, int16_t *out, int n);

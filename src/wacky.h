@@ -284,7 +284,8 @@ WSound *wsound_create(const WDat *dat);
 void    wsound_free(WSound *s);
 void    wsound_play(int id);
 void    wsound_engine(int on, int throttle);
-void    wsound_music(const WDat *dat, const char *base);
+void    wsound_music(const WDat *dat, const char *base);       /* looped */
+void    wsound_music_once(const WDat *dat, const char *base);  /* jingle  */
 void    wsound_music_stop(void);
 
 /* ---- In-race HUD (src/hud.c) ---- */

@@ -225,7 +225,7 @@ void wsound_free(WSound *s) {
 }
 
 /* start a KLM song by base name ("TURBO"); replaces any playing song */
-void wsound_music(const WDat *dat, const char *base) {
+static void music_start(const WDat *dat, const char *base, int loop) {
     WSound *s = G;
     if (!s) return;
     char name[24];
@@ -241,7 +241,7 @@ void wsound_music(const WDat *dat, const char *base) {
     if (s->music) {
         uint8_t *old = s->song;
         s->song = copy;
-        if (!wklm_start(s->music, s->song, len)) {
+        if (!wklm_start(s->music, s->song, len, loop)) {
             free(s->song);
             s->song = old;
         } else {
@@ -252,6 +252,9 @@ void wsound_music(const WDat *dat, const char *base) {
     }
     SDL_UnlockAudioDevice(s->dev);
 }
+
+void wsound_music(const WDat *dat, const char *base) { music_start(dat, base, 1); }
+void wsound_music_once(const WDat *dat, const char *base) { music_start(dat, base, 0); }
 
 void wsound_music_stop(void) {
     WSound *s = G;

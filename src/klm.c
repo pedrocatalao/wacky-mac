@@ -50,7 +50,7 @@ struct WKlm {
     int rate;                       /* output rate */
     const uint8_t *data;
     uint32_t len, songoff, pos;
-    int tempo, wait, playing;
+    int tempo, wait, playing, loop;
     /* sequencer clock and output resampler, both 16.16 fixed point */
     int64_t  tick_rem_fp;           /* chip samples until the next tick */
     uint32_t tick_len_fp;
@@ -217,8 +217,9 @@ void wklm_stop(WKlm *k) {
     wopl_reset(k->opl);
 }
 
-bool wklm_start(WKlm *k, const uint8_t *data, uint32_t len) {
+bool wklm_start(WKlm *k, const uint8_t *data, uint32_t len, int loop) {
     if (!k || !data || len < 6) return false;
+    k->loop = loop;
     uint16_t tempo = (uint16_t)(data[0] | data[1] << 8);
     uint16_t songoff = (uint16_t)(data[3] | data[4] << 8);
     if (tempo == 0 || songoff < 5 || songoff >= len) return false;
@@ -245,7 +246,12 @@ static void seq_tick(WKlm *k) {
     const uint8_t *d = k->data;
     while (k->pos < k->len) {
         uint8_t c = d[k->pos];
-        if (c == 0xFF) {                       /* end: loop the song */
+        if (c == 0xFF) {                       /* end of song */
+            if (!k->loop) {
+                for (int ch = 0; ch < KCH; ch++) drv_note_off(k, ch);
+                k->playing = 0;
+                return;
+            }
             k->pos = k->songoff;
             continue;
         }
