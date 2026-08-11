@@ -152,6 +152,17 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
         dst[i] = (int16_t)v;
     }
     if (len > n * 2) memset(stream + n * 2, 0, (size_t)(len - n * 2));
+    /* diagnostic: dump the mix when WW_MIXDUMP names a file */
+    {
+        static FILE *dumpf;
+        static int tried;
+        if (!tried) {
+            tried = 1;
+            const char *p = getenv("WW_MIXDUMP");
+            if (p) dumpf = fopen(p, "wb");
+        }
+        if (dumpf) fwrite(dst, 2, (size_t)n, dumpf);
+    }
 }
 
 WSound *wsound_create(const WDat *dat) {
