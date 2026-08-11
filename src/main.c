@@ -302,6 +302,10 @@ int main(int argc, char **argv) {
                     }
                 }
             }
+            /* drop the time spent loading, or the accumulator would fire a
+             * burst of catch-up ticks and eat the whole intro fly-in */
+            prev = SDL_GetPerformanceCounter();
+            acc_ms = 0;
             cyc_cnt60 = track.cycle_on ? 1 : 0;   /* GAM line 25 seeds counter */
             cyc_cnt50 = 0;
             cyc_ph_a = 0;
@@ -327,7 +331,9 @@ int main(int argc, char **argv) {
         Uint64 now = SDL_GetPerformanceCounter();
         acc_ms += (double)(now - prev) * 1000.0 / (double)SDL_GetPerformanceFrequency();
         prev = now;
-        if (acc_ms > 500) acc_ms = 500;
+        /* the original runs exactly one logic tick per rendered frame, paced
+         * by a busy-wait floor — never a burst of catch-up ticks */
+        if (acc_ms > TICK_MS) acc_ms = TICK_MS;
 
         const Uint8 *keys = SDL_GetKeyboardState(NULL);
         if (dump_path) { acc_ms = TICK_MS; }   /* deterministic single tick */
@@ -338,7 +344,7 @@ int main(int argc, char **argv) {
         bool fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_Z];
 
         bool ticked = false;
-        while (acc_ms >= TICK_MS) {          /* authentic 11.34 Hz fixed step */
+        if (acc_ms >= TICK_MS) {             /* one tick per frame, 11.34 Hz */
             if (intro_step(&player, &TB, scene)) {
                 acc_ms -= TICK_MS;
                 ticked = true;
