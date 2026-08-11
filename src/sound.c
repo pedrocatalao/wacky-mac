@@ -7,6 +7,7 @@
  */
 #include "wacky.h"
 
+#include "klm.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +48,8 @@ struct WSound {
     Sample smp[WSND_COUNT];
     Voice voice[MAX_VOICES];
     Engine eng;
+    WKlm *music;
+    uint8_t *song;          /* owned copy of the current KLM stream */
     SDL_AudioSpec spec;
 };
 
@@ -105,10 +108,10 @@ static bool voc_decode(const uint8_t *d, uint32_t len, uint8_t **out,
 static void mix_cb(void *ud, Uint8 *stream, int len) {
     WSound *s = ud;
     (void)ud;
-    int16_t acc[4096];
+    int32_t acc[4096];
     int n = len / 2;
     if (n > 4096) n = 4096;
-    memset(acc, 0, (size_t)n * 2);
+    memset(acc, 0, (size_t)n * 4);
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice *vo = &s->voice[v];
         if (!vo->active || !vo->s) continue;
@@ -125,6 +128,12 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
             acc[i] += (int16_t)((int)s->eng.smp.pcm[idx] - 128) << 5;
             s->eng.pos_fp += s->eng.step_fp;
         }
+    }
+    /* music */
+    if (s->music) {
+        int16_t mus[4096];
+        wklm_render(s->music, mus, n);
+        for (int i = 0; i < n; i++) acc[i] += mus[i] >> 1;
     }
 
     int16_t *dst = (int16_t *)stream;
@@ -209,8 +218,47 @@ void wsound_free(WSound *s) {
     SDL_CloseAudioDevice(s->dev);
     for (int i = 0; i < WSND_COUNT; i++) free(s->smp[i].pcm);
     free(s->eng.smp.pcm);
+    wklm_free(s->music);
+    free(s->song);
     if (G == s) G = NULL;
     free(s);
+}
+
+/* start a KLM song by base name ("TURBO"); replaces any playing song */
+void wsound_music(const WDat *dat, const char *base) {
+    WSound *s = G;
+    if (!s) return;
+    char name[24];
+    snprintf(name, sizeof name, "%s.KLM", base);
+    uint32_t len;
+    const uint8_t *d = wdat_find(dat, name, &len);
+    if (!d) return;
+    uint8_t *copy = malloc(len);
+    if (!copy) return;
+    memcpy(copy, d, len);
+    SDL_LockAudioDevice(s->dev);
+    if (!s->music) s->music = wklm_create(s->rate);
+    if (s->music) {
+        uint8_t *old = s->song;
+        s->song = copy;
+        if (!wklm_start(s->music, s->song, len)) {
+            free(s->song);
+            s->song = old;
+        } else {
+            free(old);
+        }
+    } else {
+        free(copy);
+    }
+    SDL_UnlockAudioDevice(s->dev);
+}
+
+void wsound_music_stop(void) {
+    WSound *s = G;
+    if (!s || !s->music) return;
+    SDL_LockAudioDevice(s->dev);
+    wklm_stop(s->music);
+    SDL_UnlockAudioDevice(s->dev);
 }
 
 void wsound_play(int id) {

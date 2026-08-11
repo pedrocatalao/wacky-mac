@@ -9,6 +9,7 @@
 #include "opl2.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define OPS 18
@@ -52,6 +53,8 @@ struct WOpl {
     Op  op[OPS];
     Ch  ch[CHS];
     int rate;
+    uint8_t  bd;      /* register 0xBD: rhythm enable + key bits  */
+    uint32_t lfsr;    /* noise generator for snare/hihat/cymbal   */
 };
 
 /* operator index for (channel, slot) — the chip's irregular layout */
@@ -66,7 +69,7 @@ static const int REG2OP[32] = {
 WOpl *wopl_create(int rate) {
     build_tables();
     WOpl *o = calloc(1, sizeof *o);
-    if (o) o->rate = rate;
+    if (o) { o->rate = rate; o->lfsr = 1; }
     return o;
 }
 
@@ -77,6 +80,7 @@ void wopl_reset(WOpl *o) {
     int r = o->rate;
     memset(o, 0, sizeof *o);
     o->rate = r;
+    o->lfsr = 1;
 }
 
 /* attack/decay/release rates: the chip's rate index -> per-sample increment */
@@ -89,8 +93,36 @@ static double env_rate(int rate_idx, int srate, int attack) {
     return 1000.0 / (ms * srate);
 }
 
+static void op_key(Op *p, int on) {
+    if (on) { p->stage = 1; p->phase = 0; }
+    else if (p->stage != 0) p->stage = 4;
+}
+
 void wopl_write(WOpl *o, uint8_t reg, uint8_t val) {
     if (!o) return;
+    if (reg == 0xBD) {
+        /* rhythm mode: bit5 enable, bits 4..0 key BD/SD/TT/CY/HH */
+        uint8_t was = o->bd;
+        o->bd = val;
+        uint8_t rise = (uint8_t)(val & ~was), fall = (uint8_t)(was & ~val);
+        struct { uint8_t bit; int op1, op2; } K[5] = {
+            {0x10, 12, 15},   /* bass drum: both ops of channel 6 */
+            {0x08, 16, -1},   /* snare  */
+            {0x04, 14, -1},   /* tomtom */
+            {0x02, 17, -1},   /* cymbal */
+            {0x01, 13, -1},   /* hi-hat */
+        };
+        for (int i = 0; i < 5; i++) {
+            if (rise & K[i].bit) {
+                op_key(&o->op[K[i].op1], 1);
+                if (K[i].op2 >= 0) op_key(&o->op[K[i].op2], 1);
+            } else if (fall & K[i].bit) {
+                op_key(&o->op[K[i].op1], 0);
+                if (K[i].op2 >= 0) op_key(&o->op[K[i].op2], 0);
+            }
+        }
+        return;
+    }
     int grp = reg & 0xE0, idx = reg & 0x1F;
     if (grp == 0x20 || grp == 0x40 || grp == 0x60 || grp == 0x80 || grp == 0xE0) {
         int oi = idx < 32 ? REG2OP[idx] : -1;
@@ -113,6 +145,8 @@ void wopl_write(WOpl *o, uint8_t reg, uint8_t val) {
         Ch *c = &o->ch[reg - 0xB0];
         c->fnum = (uint16_t)((c->fnum & 0xFF) | ((val & 3) << 8));
         c->block = (val >> 2) & 7;
+        /* rhythm mode: B0 keyon is ignored on channels 6-8 */
+        if ((o->bd & 0x20) && reg >= 0xB6) return;
         int on = (val >> 5) & 1;
         if (on && !c->keyon) {
             for (int s = 0; s < 2; s++) {
@@ -169,19 +203,39 @@ static int16_t op_run(WOpl *o, Op *p, uint32_t inc, int16_t mod) {
     return (int16_t)(s * p->env * att);
 }
 
+static const double MUL[16] = {0.5,1,2,3,4,5,6,7,8,9,10,10,12,12,15,15};
+
+static uint32_t ch_inc(const WOpl *o, const Ch *ch, const Op *p) {
+    double base = (double)ch->fnum * (1 << ch->block) * 49716.0 / 1048576.0;
+    return (uint32_t)(base * MUL[p->mult] / o->rate * 1024.0 * 1024.0);
+}
+
+/* percussion operator: envelope + amplitude as usual, but the waveform is
+ * replaced by the noise generator (snare/hihat/cymbal are noise-based on
+ * the real chip; the tom-tom stays tonal and uses op_run) */
+static int16_t op_noise(WOpl *o, Op *p, uint32_t inc) {
+    p->phase += inc;
+    int16_t s = (o->lfsr & 1) ? 4084 : -4084;
+    double att = pow(10.0, -(p->tl * 0.75) / 20.0);
+    env_step(p, o->rate);
+    return (int16_t)(s * p->env * att * 0.5);
+}
+
 void wopl_render(WOpl *o, int16_t *out, int n) {
     if (!o) { memset(out, 0, (size_t)n * 2); return; }
+    int rhythm = o->bd & 0x20;
     for (int i = 0; i < n; i++) {
         int acc = 0;
-        for (int c = 0; c < CHS; c++) {
+        /* clock the 23-bit noise LFSR once per sample */
+        uint32_t fb = ((o->lfsr >> 14) ^ o->lfsr) & 1;
+        o->lfsr = (o->lfsr >> 1) | (fb << 22);
+        if (!o->lfsr) o->lfsr = 1;
+        int melodic = rhythm ? 6 : CHS;
+        for (int c = 0; c < melodic; c++) {
             Ch *ch = &o->ch[c];
             Op *m = &o->op[OPMAP[c][0]], *k = &o->op[OPMAP[c][1]];
             if (m->stage == 0 && k->stage == 0) continue;
-            /* phase increment: fnum * 2^block, scaled by the multiplier */
-            double base = (double)ch->fnum * (1 << ch->block) * 49716.0 / 1048576.0;
-            static const double MUL[16] = {0.5,1,2,3,4,5,6,7,8,9,10,10,12,12,15,15};
-            uint32_t incm = (uint32_t)(base * MUL[m->mult] / o->rate * 1024.0 * 1024.0);
-            uint32_t inck = (uint32_t)(base * MUL[k->mult] / o->rate * 1024.0 * 1024.0);
+            uint32_t incm = ch_inc(o, ch, m), inck = ch_inc(o, ch, k);
             int16_t fbmod = ch->fb ? (int16_t)((m->prev + m->out) >> (9 - ch->fb)) : 0;
             int16_t mo = op_run(o, m, incm, fbmod);
             m->prev = m->out;
@@ -191,6 +245,26 @@ void wopl_render(WOpl *o, int16_t *out, int n) {
             } else {                          /* FM */
                 acc += op_run(o, k, inck, mo);
             }
+        }
+        if (rhythm) {
+            /* bass drum: channel 6 as a normal FM pair, keyed via 0xBD */
+            Ch *c6 = &o->ch[6];
+            Op *m = &o->op[12], *k = &o->op[15];
+            if (m->stage || k->stage) {
+                int16_t fbmod = c6->fb ? (int16_t)((m->prev + m->out) >> (9 - c6->fb)) : 0;
+                int16_t mo = op_run(o, m, ch_inc(o, c6, m), fbmod);
+                m->prev = m->out;
+                m->out = mo;
+                acc += op_run(o, k, ch_inc(o, c6, k), mo) * 2;
+            }
+            /* hi-hat (op13) and snare (op16) run off channel 7's frequency,
+             * tom-tom (op14, tonal) and cymbal (op17) off channel 8's */
+            Op *hh = &o->op[13], *sd = &o->op[16];
+            Op *tt = &o->op[14], *cy = &o->op[17];
+            if (hh->stage) acc += op_noise(o, hh, ch_inc(o, &o->ch[7], hh));
+            if (sd->stage) acc += op_noise(o, sd, ch_inc(o, &o->ch[7], sd)) * 2;
+            if (tt->stage) acc += op_run(o, tt, ch_inc(o, &o->ch[8], tt), 0) * 2;
+            if (cy->stage) acc += op_noise(o, cy, ch_inc(o, &o->ch[8], cy));
         }
         if (acc > 32767) acc = 32767;
         if (acc < -32768) acc = -32768;

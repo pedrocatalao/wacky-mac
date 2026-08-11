@@ -289,6 +289,21 @@ int main(int argc, char **argv) {
             player.character = kart_id;
             intro_arm(&player, scene, &track, kart_id);
 
+            /* race music (FUN_00032e60): each cup rotates a trio of songs
+             * over its first four tracks and always plays OVERDRIV on the
+             * fifth; the rotation counter starts at 1, giving A,B,C,A */
+            {
+                static const char *TRIO[3][3] = {
+                    { "TURBO",    "DANCE",    "FLIGHT"   },
+                    { "STARBRAI", "BASSATTK", "KARD"     },
+                    { "BANSHI",   "STARBRAI", "BRICWALL" },
+                };
+                int cup = (tracknum - 1) / 5, slot = (tracknum - 1) % 5;
+                if (cup > 2) cup = 2;
+                wsound_music(&dat, slot == 4 ? "OVERDRIV"
+                                             : TRIO[cup][slot == 3 ? 0 : slot]);
+            }
+
             /* headless pre-simulation for frame dumps: argv[4] = tick count */
             if (dump_path && argc > 4) {
                 int pre = atoi(argv[4]);

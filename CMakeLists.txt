@@ -23,6 +23,8 @@ add_executable(openwacky
     src/physics.c
     src/hud.c
     src/sound.c
+    src/opl2.c
+    src/klm.c
     src/sprites.c
     src/weapons.c
     src/wdat.c
