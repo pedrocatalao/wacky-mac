@@ -436,16 +436,16 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 if (mode == 0 &&
                     wai_kart_pass_check(ai, k, frame == 4,
                         e.bucket < 3 && s->rowtab[e.dist & 0xFFF] <= 192,
-                        e.sx < 160 - 4 ? 2 : 0)) {
+                        e.sx < 160 - 4 ? 2 : 0))
                     wsound_play(sprite);
-                    /* both heads turn together: the player glances toward
-                     * the shouting opponent's side at the same moment */
-                    wai_player_look_try(ai, e.sx < 160 ? 1 : 3);
-                }
-                /* player head-turn + the PASS whoosh: an opponent whose
-                 * baseline is level with or below the player's is right
-                 * beside him ([0xf] codes 3/2); left or centre -> look
-                 * left (position 1), right -> look right (position 3) */
+                /* player head-turn + the PASS whoosh: the player's kart
+                 * sits ~125 units ahead of the camera, so an opponent
+                 * drawn with its baseline level with or below the
+                 * player's ([0xf] codes 3/2) is physically drawing level
+                 * - the incoming opponent. The player checks it: left or
+                 * centre -> look left (position 1), right -> right (3).
+                 * The same principle drives the AI look above, from the
+                 * other kart's point of view. */
                 if (mode == 0 && s->rowtab[e.dist & 0xFFF] >= 191 &&
                     wai_player_look_try(ai, e.sx <= 160 + 4 ? 1 : 3))
                     wsound_play(8);            /* PASS.VOC */
