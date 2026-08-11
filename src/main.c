@@ -467,7 +467,7 @@ int main(int argc, char **argv) {
             }
             tick_no++;
             if (scene) wscene_tick(scene);
-            wsound_engine(phase == RACING, player.throttle);
+            wsound_engine(phase == RACING, whud_speed_shown(hud));
             if (ai) {
                 int32_t pprog = (int32_t)(lap - 1) * track.pos_max + prev_prog;
                 wai_tick(ai, &TB, pprog, 1);

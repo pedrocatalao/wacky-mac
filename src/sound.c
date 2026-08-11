@@ -9,6 +9,7 @@
 
 #include "klm.h"
 #include <SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -278,16 +279,19 @@ void wsound_play(int id) {
     SDL_UnlockAudioDevice(s->dev);
 }
 
-/* engine loop: on/off plus a pitch that tracks the velocity index, so the
- * motor rises and falls with the throttle */
-void wsound_engine(int on, int throttle) {
+/* engine loop pitch, the original's model: the race tick programs the motor
+ * voice with a pitch of (shown_speed * 20 - 1800) cents (FUN_00041b44 call
+ * site), which the driver maps through its 2^(cents/1200) table
+ * (FUN_0004f140). shown_speed is the slewed speedometer value, so the motor
+ * idles 1.5 octaves below the sample and climbs with the needle. */
+void wsound_engine(int on, int shown_speed) {
     WSound *s = G;
     if (!s || !s->eng.smp.pcm) return;
     SDL_LockAudioDevice(s->dev);
     s->eng.on = on;
-    if (throttle < 0) throttle = 0;
-    if (throttle > 100) throttle = 100;
-    /* idle at 0.75x, full throttle at ~1.6x */
-    s->eng.step_fp = (uint32_t)((0.75 + throttle * 0.0085) * 65536.0);
+    if (shown_speed < 0) shown_speed = 0;
+    if (shown_speed > 130) shown_speed = 130;
+    double ratio = exp2((shown_speed * 20.0 - 1800.0) / 1200.0);
+    s->eng.step_fp = (uint32_t)(ratio * 65536.0);
     SDL_UnlockAudioDevice(s->dev);
 }
