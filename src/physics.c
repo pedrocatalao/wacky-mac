@@ -169,6 +169,21 @@ static void walk_path(const PhysCtx *c, WPhys *p,
     if (!p->collide) probe_step(c, p, p->posx, p->posy, nx, ny);
 }
 
+/* scroll the horizon panorama by the current lean counter (FUN_00024834):
+ * left steering walks the window down, right walks it up, each end wrapping
+ * back into the middle of the doubled 640px panorama */
+void wphys_sky_scroll(WPhys *p, int right) {
+    if (!right) {
+        if (p->sky_off == 0) p->sky_off = 160;
+        p->sky_off -= p->lean_l;
+        if (p->sky_off < 0) p->sky_off = 0;
+    } else {
+        if (p->sky_off == 240) p->sky_off = 80;
+        p->sky_off += p->lean_r;
+        if (p->sky_off > 240) p->sky_off = 240;
+    }
+}
+
 /* rotate about the point ndist[0] ahead, keeping it fixed (the steering
  * pivot, also used by the race-start camera swing) */
 void wphys_pivot_turn(WPhys *p, const WTables *tb, int amount, int dir) {
@@ -242,9 +257,7 @@ static void player_move(const PhysCtx *c, WPhys *p) {
             } else {
                 p->lean_l = 0x10;
             }
-            if (p->sky_off == 0) p->sky_off = 160;   /* wrap at the low end */
-            p->sky_off -= p->lean_l;
-            if (p->sky_off < 0) p->sky_off = 0;
+            wphys_sky_scroll(p, 0);
         }
         if (p->steer_r < 1) {
             if (--p->lean_r < 0) p->lean_r = 0;
@@ -255,9 +268,7 @@ static void player_move(const PhysCtx *c, WPhys *p) {
             } else {
                 p->lean_r = 0x10;
             }
-            if (p->sky_off == 240) p->sky_off = 80;  /* wrap at the high end */
-            p->sky_off += p->lean_r;
-            if (p->sky_off > 240) p->sky_off = 240;
+            wphys_sky_scroll(p, 1);
         }
         whisker_respond(c, p);
     }

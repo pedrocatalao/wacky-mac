@@ -196,6 +196,7 @@ typedef struct {
 
 void wphys_reset(WPhys *p, const WTrack *t);
 void wphys_pivot_turn(WPhys *p, const WTables *tb, int amount, int dir);
+void wphys_sky_scroll(WPhys *p, int right);
 void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
                 const WPhysInput *in, int detail_level, const WCollide *col);
 

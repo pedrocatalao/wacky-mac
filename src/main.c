@@ -149,12 +149,19 @@ static bool intro_step(WPhys *p, const WTables *tb, WScene *scene) {
         if (p->posx <= start_x) { p->posx = start_x; phase = START_SWING; }
         break;
     case START_SWING:
+        /* the original ramps the same lean counter the steering uses and
+         * calls the panorama scroll each step, so the horizon turns with
+         * the camera during the swing */
+        if (++p->lean_l > 4) p->lean_l = 4;
         wphys_pivot_turn(p, tb, 0x28, -1);
         if (p->angle < 0x1E1) {
             p->posx = start_x - 0x84;
             p->posy = start_y;
             p->angle = 0x1E0;
+            p->lean_l = 0;
             phase = START_LIGHT;
+        } else {
+            wphys_sky_scroll(p, 0);
         }
         break;
     default:
