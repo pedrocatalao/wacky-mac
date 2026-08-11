@@ -596,14 +596,12 @@ int main(int argc, char **argv) {
                      * FUN_00016ca0 region) */
                     int rot = (4 + player.spin_frame) & 7;
                     kf = cars_raw + ((size_t)kart_id * 12 + rot) * KART_W * KART_H;
-                } else if (ai && wai_player_look(ai) && char_raw[kart_id]) {
-                    /* head-turn toward a passing opponent: the pass block
-                     * sets steering position 1 (left) or 3 (right) - the
-                     * character's lean frame - and it takes priority over
-                     * the steering lean while it runs */
-                    int pl = wai_player_look(ai);
+                } else if (ai && wai_player_look(ai) >= 0 && char_raw[kart_id]) {
+                    /* head-turn toward a passing opponent: rises to the
+                     * strong lean frame, holds and eases back; takes
+                     * priority over the steering lean while it runs */
                     kf = char_raw[kart_id] +
-                         (size_t)(pl == 1 ? 0 : 2) * KART_W * KART_H;
+                         (size_t)wai_player_look(ai) * KART_W * KART_H;
                 } else if (steer_anim == 2 || !char_raw[kart_id]) {
                     kf = cars_raw ? cars_raw + ((size_t)kart_id * 12 + 4) * KART_W * KART_H
                                   : NULL;

@@ -171,7 +171,10 @@ void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_ra
     if (ai->plook_ticks > 0) ai->plook_ticks--;
     for (int i = 1; i < 8; i++) {
         struct AiKart *k = &ai->k[i];
-        if (k->look_ticks > 0) k->look_ticks--;
+        /* the look latch clears when the animation has played out (the
+         * original's [0x14] state machine ends at 0), so the gag re-arms
+         * even for karts that have dropped out of view behind the player */
+        if (k->look_ticks > 0 && --k->look_ticks == 0) k->looked = 0;
         /* destroyed: 4-frame squash animation, then the kart is gone
          * (FUN_000261fc + the kart draw's hitFlag == 2 branch) */
         if (k->hit_flag == 2) {
@@ -354,7 +357,8 @@ int wai_kart_look(const WAi *ai, int i) {
 }
 
 /* player head-turn: triggered when an opponent is level with or closer
- * than the player; refuses while one is already running */
+ * than the player, and together with an opponent's shout; refuses while
+ * one is already running */
 int wai_player_look_try(WAi *ai, int dir) {
     if (!ai || ai->plook_ticks > 0) return 0;
     ai->plook_dir = dir;
@@ -362,8 +366,14 @@ int wai_player_look_try(WAi *ai, int dir) {
     return 1;
 }
 
+/* current lean frame for the player's head-turn (character SP frames:
+ * 0/1 = left mild/strong, 2/3 = right), rising to the strong lean,
+ * holding, then easing back like the AI's ticker; -1 when inactive */
 int wai_player_look(const WAi *ai) {
-    return ai && ai->plook_ticks > 0 ? ai->plook_dir : 0;
+    if (!ai || ai->plook_ticks <= 0) return -1;
+    int t = ai->plook_ticks;
+    int step = (t > 0x11 || t <= 3) ? 0 : 1;
+    return (ai->plook_dir == 1 ? 0 : 2) + step;
 }
 
 void wai_set_view_frame(WAi *ai, int i, int frame) {

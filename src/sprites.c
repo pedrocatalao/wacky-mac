@@ -436,8 +436,12 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 if (mode == 0 &&
                     wai_kart_pass_check(ai, k, frame == 4,
                         e.bucket < 3 && s->rowtab[e.dist & 0xFFF] <= 192,
-                        e.sx < 160 - 4 ? 2 : 0))
+                        e.sx < 160 - 4 ? 2 : 0)) {
                     wsound_play(sprite);
+                    /* both heads turn together: the player glances toward
+                     * the shouting opponent's side at the same moment */
+                    wai_player_look_try(ai, e.sx < 160 ? 1 : 3);
+                }
                 /* player head-turn + the PASS whoosh: an opponent whose
                  * baseline is level with or below the player's is right
                  * beside him ([0xf] codes 3/2); left or centre -> look
