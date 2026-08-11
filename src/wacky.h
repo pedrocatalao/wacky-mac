@@ -162,6 +162,7 @@ typedef struct {
     int     hop_state, hop_air, hop_height, hop_maxh;  /* ramp jumps          */
     int     turbo, turbo_timer;
     int     engine_state, engine_anim;   /* kart +0x62 / +0x54: exhaust anim */
+    int     character;       /* driver index, also its voice sound id       */
     int     weapon_id;       /* 0 default hedgehog, 3..8 special (see docs)  */
     int     ammo;            /* hedgehog count, cap 99                        */
     int     fire_latch, last_fire_tick;
@@ -270,6 +271,7 @@ typedef struct WSound WSound;
 WSound *wsound_create(const WDat *dat);
 void    wsound_free(WSound *s);
 void    wsound_play(int id);
+void    wsound_engine(int on, int throttle);
 
 /* ---- In-race HUD (src/hud.c) ---- */
 

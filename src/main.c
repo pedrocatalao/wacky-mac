@@ -285,6 +285,7 @@ int main(int argc, char **argv) {
             hud = whud_create(&dat, tracknum);
             wphys_reset(&player, &track);
             player.ammo = 4;     /* the original starts you with hedgehogs */
+            player.character = kart_id;
             intro_arm(&player, scene, &track, kart_id);
 
             /* headless pre-simulation for frame dumps: argv[4] = tick count */
@@ -383,6 +384,7 @@ int main(int argc, char **argv) {
                 int rel = (compass - (cam_oct & 7)) & 7;
                 if (rel == 0 || rel == 1 || rel == 7) {
                     wai_kart_ram(ai, player.collide_kart);
+                    wsound_play(WSND_BOOM);
                     player.throttle = 0;
                     player.speed = 0;
                     player.drift = 0;
@@ -402,6 +404,7 @@ int main(int argc, char **argv) {
             }
             tick_no++;
             if (scene) wscene_tick(scene);
+            wsound_engine(phase == RACING, player.throttle);
             if (ai) {
                 int32_t pprog = (int32_t)(lap - 1) * track.pos_max + prev_prog;
                 wai_tick(ai, &TB, pprog, 1);

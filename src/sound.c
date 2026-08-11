@@ -31,11 +31,21 @@ typedef struct {
     int active;
 } Voice;
 
+/* the engine is a separate looping voice whose playback rate rises with
+ * speed (the original streams MOTOR.VOC continuously and repitches it) */
+typedef struct {
+    Sample   smp;
+    uint32_t pos_fp;      /* 16.16 position */
+    uint32_t step_fp;     /* 16.16 step     */
+    int      on;
+} Engine;
+
 struct WSound {
     SDL_AudioDeviceID dev;
     int rate;
     Sample smp[WSND_COUNT];
     Voice voice[MAX_VOICES];
+    Engine eng;
     SDL_AudioSpec spec;
 };
 
@@ -106,6 +116,16 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
             acc[i] += (int16_t)((int)vo->s->pcm[vo->pos++] - 128) << 6;
         }
     }
+    /* engine loop */
+    if (s->eng.on && s->eng.smp.pcm && s->eng.smp.len) {
+        for (int i = 0; i < n; i++) {
+            uint32_t idx = s->eng.pos_fp >> 16;
+            if (idx >= s->eng.smp.len) { s->eng.pos_fp = 0; idx = 0; }
+            acc[i] += (int16_t)((int)s->eng.smp.pcm[idx] - 128) << 5;
+            s->eng.pos_fp += s->eng.step_fp;
+        }
+    }
+
     int16_t *dst = (int16_t *)stream;
     for (int i = 0; i < n; i++) {
         int v = acc[i];
@@ -157,6 +177,27 @@ WSound *wsound_create(const WDat *dat) {
         s->smp[i].pcm = pcm;
         s->smp[i].len = n;
     }
+    /* engine sample is loaded by name, outside the id table */
+    {
+        uint32_t len;
+        const uint8_t *d = wdat_find(dat, "MOTOR.VOC", &len);
+        uint8_t *pcm; uint32_t n; int rate;
+        if (d && voc_decode(d, len, &pcm, &n, &rate)) {
+            if (rate != s->rate && rate > 0) {
+                uint32_t on2 = (uint32_t)((uint64_t)n * s->rate / rate);
+                uint8_t *o = malloc(on2 ? on2 : 1);
+                if (o) {
+                    for (uint32_t k = 0; k < on2; k++)
+                        o[k] = pcm[(uint64_t)k * rate / s->rate];
+                    free(pcm); pcm = o; n = on2;
+                }
+            }
+            s->eng.smp.pcm = pcm;
+            s->eng.smp.len = n;
+            s->eng.step_fp = 1 << 16;
+        }
+    }
+
     G = s;
     SDL_PauseAudioDevice(s->dev, 0);
     return s;
@@ -166,6 +207,7 @@ void wsound_free(WSound *s) {
     if (!s) return;
     SDL_CloseAudioDevice(s->dev);
     for (int i = 0; i < WSND_COUNT; i++) free(s->smp[i].pcm);
+    free(s->eng.smp.pcm);
     if (G == s) G = NULL;
     free(s);
 }
@@ -181,5 +223,19 @@ void wsound_play(int id) {
     s->voice[slot].s = &s->smp[id];
     s->voice[slot].pos = 0;
     s->voice[slot].active = 1;
+    SDL_UnlockAudioDevice(s->dev);
+}
+
+/* engine loop: on/off plus a pitch that tracks the velocity index, so the
+ * motor rises and falls with the throttle */
+void wsound_engine(int on, int throttle) {
+    WSound *s = G;
+    if (!s || !s->eng.smp.pcm) return;
+    SDL_LockAudioDevice(s->dev);
+    s->eng.on = on;
+    if (throttle < 0) throttle = 0;
+    if (throttle > 100) throttle = 100;
+    /* idle at 0.75x, full throttle at ~1.6x */
+    s->eng.step_fp = (uint32_t)((0.75 + throttle * 0.0085) * 65536.0);
     SDL_UnlockAudioDevice(s->dev);
 }

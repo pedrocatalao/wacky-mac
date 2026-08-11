@@ -236,6 +236,7 @@ static void player_move(const PhysCtx *c, WPhys *p) {
         /* sparks on the side that was hit: horzRel 5 -> right, else left */
         p->scrape_state = p->bump_horz == 5 ? 4 : 3;
         p->scrape_cnt = 0;
+        wsound_play(p->collide == 3 ? WSND_SWIPE : WSND_CLANG);
     }
 
     if (p->collide == 1) {
@@ -342,6 +343,7 @@ static void player_steer(const PhysCtx *c, WPhys *p, int steer_rate,
                 p->hold_l = p->hold_r = 0;
                 p->drift = 2;
                 p->drift_timer = 0x78;
+                wsound_play(WSND_SKID);
                 if (p->grip != 0) return;
                 /* zero grip: instant spin right */
                 p->drift = 0; p->steer_r = 0; p->spin_dir = 2;
@@ -352,6 +354,7 @@ static void player_steer(const PhysCtx *c, WPhys *p, int steer_rate,
                 if (keyL) p->steer_l = drift_rate;
                 p->drift = 1;
                 p->drift_timer = 0x78;
+                wsound_play(WSND_SKID);
                 p->hold_l = p->hold_r = 0;
                 if (p->grip != 0) return;
                 p->drift = 0; p->steer_r = 0; p->spin_dir = 1;
@@ -497,6 +500,7 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
         if (p->drift == 0 && p->spin_dir == 0 && p->throttle != 0 &&
             hop && p->hop_turn_dir == 0) {
             p->hop_turn_cnt = 1;
+            wsound_play(WSND_SKID);
             p->hop_turn_dir = keyR ? 2 : 1;
             p->drift = p->hop_turn_dir;
         }

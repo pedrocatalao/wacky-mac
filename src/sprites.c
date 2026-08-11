@@ -266,6 +266,7 @@ void wscene_resolve_pickups(WScene *s, WPhys *p) {
         } else if (behavior >= 2 && p->ammo < 99) {
             if (p->weapon_id == 0 || behavior == 2) {
                 in->anim = -1;
+                wsound_play(p->character & 7);   /* driver voice */
                 if (behavior == 2) {
                     p->ammo += 4;
                     if (p->ammo > 99) p->ammo = 99;
