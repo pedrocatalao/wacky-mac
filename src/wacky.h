@@ -211,6 +211,7 @@ void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_ra
 void wai_progress(WAi *ai, const WTrack *t);
 void wai_kart_state(const WAi *ai, int i, int *x, int *y, int *compass);
 int  wai_hit_kart(void *ctx, int x, int y, int *ox, int *oy);
+int32_t wai_progress_of(const WAi *ai, int i);
 /* projectile probes: kart within Manhattan 0x12, and the hit reaction
  * (spin_state 1 = spin 0x21 ticks, 2 = squash 0x32 ticks) */
 int  wai_kart_at(void *ctx, int x, int y);
@@ -251,10 +252,19 @@ void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
 /* ---- In-race HUD (src/hud.c) ---- */
 
 typedef struct WHud WHud;
+
+/* race state the HUD reads that does not live in WPhys */
+typedef struct {
+    int32_t race_ticks;   /* 10 Hz counter                       */
+    int     lap, total_laps, place, lives;
+    int     wrong_way, finished, racing;
+} WHudState;
+
 WHud *whud_create(const WDat *dat, int tracknum);
 void  whud_free(WHud *h);
+void  whud_draw_static(uint32_t *fb, WHud *h, const WTrack *t);
 void  whud_draw(uint32_t *fb, WHud *h, const WTrack *t, const WPhys *p,
-                const WAi *ai);
+                const WAi *ai, const WHudState *st);
 int   whud_speed_shown(const WHud *h);
 
 /* ---- Sprites (.SP raw transposed frames) ---- */

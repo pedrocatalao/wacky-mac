@@ -344,6 +344,10 @@ int wai_kart_render(WAi *ai, int i, int *x, int *y, int *compass, int *frame) {
     return 0;
 }
 
+int32_t wai_progress_of(const WAi *ai, int i) {
+    return (ai && i >= 1 && i <= 7) ? ai->k[i].progress : 0;
+}
+
 void wai_kart_state(const WAi *ai, int i, int *x, int *y, int *compass) {
     *x = ai->k[i].x;
     *y = ai->k[i].y;

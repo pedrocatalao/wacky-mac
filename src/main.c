@@ -253,7 +253,9 @@ int main(int argc, char **argv) {
     int tick_no = 0;
     WPhys player;
     int cyc_cnt60 = 0, cyc_cnt50 = 0, cyc_ph_a = 0, cyc_ph_b = 0;
-    int lap = 1, prev_prog = 0, wrong_way = 0;
+    int lap = 1, prev_prog = 0, wrong_way = 0, place = 1;
+    int32_t race_ticks10 = 0;   /* 10 Hz race clock */
+    double clock_ms = 0;
     int kart_id = 0;
     bool map_view = false;
     bool need_load = true, running = true;
@@ -356,6 +358,15 @@ int main(int argc, char **argv) {
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
             wphys_tick(&player, &track, &TB, &in, 1, &col);
             wscene_resolve_pickups(scene, &player);
+            /* 10 Hz race clock and finishing position */
+            clock_ms += TICK_MS;
+            while (clock_ms >= 100.0) { clock_ms -= 100.0; race_ticks10++; }
+            if (ai) {
+                int32_t mine = (int32_t)(lap - 1) * track.pos_max + prev_prog;
+                place = 1;
+                for (int k = 1; k < 8; k++)
+                    if (wai_progress_of(ai, k) > mine) place++;
+            }
             /* ramming (FUN_00022bf4): at full throttle, not skidding and not
              * airborne, hitting an opponent whose camera-relative octant is
              * 0/1/7 (you caught it from behind) destroys it — and takes you
@@ -531,7 +542,16 @@ int main(int argc, char **argv) {
                                     dx0, dy0 + 0x10);
                 }
             }
-            if (!map_view) whud_draw(fb, hud, &track, &player, ai);
+            if (!map_view) {
+                WHudState hs = {
+                    .race_ticks = phase == RACING ? race_ticks10 : 0,
+                    .lap = lap, .total_laps = 3, .place = place,
+                    .lives = 3, .wrong_way = wrong_way,
+                    .finished = 0, .racing = phase == RACING,
+                };
+                whud_draw_static(fb, hud, &track);
+                whud_draw(fb, hud, &track, &player, ai, &hs);
+            }
             if (dump_path) {
                 FILE *f = fopen(dump_path, "wb");
                 if (f) {
