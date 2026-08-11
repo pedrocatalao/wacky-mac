@@ -243,6 +243,15 @@ void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
                     WAi *ai, const WWeapons *weap);
 
+/* ---- In-race HUD (src/hud.c) ---- */
+
+typedef struct WHud WHud;
+WHud *whud_create(const WDat *dat, int tracknum);
+void  whud_free(WHud *h);
+void  whud_draw(uint32_t *fb, WHud *h, const WTrack *t, const WPhys *p,
+                const WAi *ai);
+int   whud_speed_shown(const WHud *h);
+
 /* ---- Sprites (.SP raw transposed frames) ---- */
 
 #define WW_SP_TRANSPARENT 0   /* blitter color key (WW.EXE FUN_00036fd0) */

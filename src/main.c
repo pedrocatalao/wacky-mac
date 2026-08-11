@@ -235,6 +235,7 @@ int main(int argc, char **argv) {
     WScene *scene = NULL;
     WAi *ai = NULL;
     WWeapons *weap = wweap_create(&dat);
+    WHud *hud = NULL;
     const uint8_t *cars_raw = wdat_find(&dat, "CARS.SP", NULL);
     /* per-character sprite files: lean frames [0..1] left, [2..3] right */
     static const char *char_names[8] = {
@@ -277,6 +278,8 @@ int main(int argc, char **argv) {
             ai = wai_load(&dat, &track, tracknum);
             if (ai) wai_reset(ai, &track, 1, 1, &TB);
             if (weap) wweap_reset(weap);
+            whud_free(hud);
+            hud = whud_create(&dat, tracknum);
             wphys_reset(&player, &track);
             player.ammo = 4;     /* the original starts you with hedgehogs */
             intro_arm(&player, scene, &track, kart_id);
@@ -529,6 +532,7 @@ int main(int argc, char **argv) {
                                     dx0, dy0 + 0x10);
                 }
             }
+            if (!map_view) whud_draw(fb, hud, &track, &player, ai);
             if (dump_path) {
                 FILE *f = fopen(dump_path, "wb");
                 if (f) {
