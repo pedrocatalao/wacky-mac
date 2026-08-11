@@ -376,7 +376,8 @@ static int cmp_far_first(const void *a, const void *b) {
 
 void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                  const WPhys *p, const uint8_t *cars_px, int player_kart,
-                 WAi *ai, const WWeapons *weap) {
+                 WAi *ai, const WWeapons *weap,
+                 const uint8_t *const char_px[8]) {
     DrawEnt list[MAX_INST + 8];
     int n = 0;
 
@@ -424,11 +425,23 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 if (!s->squash) continue;
                 e.frame = s->squash + (size_t)hitframe * 0x428;
             } else {
-                /* spinning karts cycle their own 8 rotation frames;
-                 * viewTable seed K=6 gives the rear view for same-heading */
-                int frame = (mode == 1) ? hitframe : ((compass - cam_oct + 6) & 7);
-                if (mode == 0) wai_set_view_frame(ai, k, frame);
-                e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
+                /* passing gag (FUN_00022e50 region): the first time this
+                 * kart is close (scale bucket < 3) and clearly to one side,
+                 * it turns its head (its lean pair, toward the player) and
+                 * shouts its voice - once per kart per race */
+                if (mode == 0 && e.bucket < 3 && (e.sx < 120 || e.sx > 200) &&
+                    wai_kart_try_look(ai, k, e.sx > 160 ? 2 : 0))
+                    wsound_play(sprite);
+                int lframe = mode == 0 ? wai_kart_look(ai, k) : -1;
+                if (lframe >= 0 && char_px && char_px[sprite]) {
+                    e.frame = char_px[sprite] + (size_t)lframe * 38 * 28;
+                } else {
+                    /* spinning karts cycle their own 8 rotation frames;
+                     * viewTable seed K=6 gives the rear view for same-heading */
+                    int frame = (mode == 1) ? hitframe : ((compass - cam_oct + 6) & 7);
+                    if (mode == 0) wai_set_view_frame(ai, k, frame);
+                    e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
+                }
             }
             list[n++] = e;
         }

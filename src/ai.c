@@ -39,6 +39,9 @@ struct WAi {
         int spin_frame;             /* rotation frame cycled while spinning    */
         int view_frame;             /* last frame drawn; spins start from it   */
         int hit_flag, squash_frame; /* 2 = rammed/destroyed, 4-frame squash    */
+        /* passing gag (FUN_00022xxx): each kart looks at the player and
+         * shouts its voice once per race when passed close by */
+        int looked, look_ticks, look_base;
     } k[8];
 
     int top_idx;                  /* aiTopSpeedIdx */
@@ -164,6 +167,7 @@ void wai_reset(WAi *ai, const WTrack *t, int class_id, int engine12,
 void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_rank) {
     for (int i = 1; i < 8; i++) {
         struct AiKart *k = &ai->k[i];
+        if (k->look_ticks > 0) k->look_ticks--;
         /* destroyed: 4-frame squash animation, then the kart is gone
          * (FUN_000261fc + the kart draw's hitFlag == 2 branch) */
         if (k->hit_flag == 2) {
@@ -320,6 +324,21 @@ void wai_kart_ram(WAi *ai, int idx) {
 }
 
 /* remember the frame the renderer chose, so a spin starts from it */
+/* passing gag state: each opponent looks at the player (its lean pair,
+ * toward the passing side) and shouts its voice once per race */
+int wai_kart_try_look(WAi *ai, int i, int base) {
+    if (!ai || i < 1 || i > 7 || ai->k[i].looked) return 0;
+    ai->k[i].looked = 1;
+    ai->k[i].look_ticks = 0x14;
+    ai->k[i].look_base = base;
+    return 1;
+}
+
+int wai_kart_look(const WAi *ai, int i) {
+    if (!ai || i < 1 || i > 7 || ai->k[i].look_ticks <= 0) return -1;
+    return ai->k[i].look_base + ((ai->k[i].look_ticks >> 1) & 1);
+}
+
 void wai_set_view_frame(WAi *ai, int i, int frame) {
     if (ai && i >= 1 && i <= 7) ai->k[i].view_frame = frame;
 }

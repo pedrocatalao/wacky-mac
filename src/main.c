@@ -261,6 +261,13 @@ int main(int argc, char **argv) {
     double clock_ms = 0;
     int kart_id = 0;
     int race_laps = 3;
+    /* finish-line sequence (FUN_00026a3c states): spin away, wave at the
+     * camera, drive back off the bottom. Wave frame counts per character. */
+    static const int WAVE_N[8] = { 4, 4, 4, 4, 2, 1, 2, 1 };
+    int fin_state = 0, fin_y = 0, fin_frame = 0, fin_hold = 0;
+    int fin_places[8] = {0};
+    /* water submerge (FUN_000237xx entry + the kart draw's +0x44 branch) */
+    int sink_on = 0, sink_frame = 0;
     bool map_view = false;
     /* the full game flow (logos, menus, championship) runs unless a track
      * was named on the command line — that form keeps the old direct-to-race
@@ -331,6 +338,9 @@ int main(int argc, char **argv) {
                 }
             }
             /* fresh race state */
+            fin_state = 0;
+            sink_on = 0;
+            sink_frame = 0;
             lap = 1;
             prev_prog = 0;
             wrong_way = 0;
@@ -404,7 +414,7 @@ int main(int argc, char **argv) {
 
         const Uint8 *keys = SDL_GetKeyboardState(NULL);
         if (dump_path) { acc_ms = TICK_MS; }   /* deterministic single tick */
-        bool accel = keys[SDL_SCANCODE_UP] || dump_path != NULL;
+        bool accel = (keys[SDL_SCANCODE_UP] || dump_path != NULL) && !fin_state;
         bool brake = keys[SDL_SCANCODE_DOWN];
         bool left = keys[SDL_SCANCODE_LEFT], right = keys[SDL_SCANCODE_RIGHT];
         bool hop = keys[SDL_SCANCODE_X];
@@ -467,7 +477,28 @@ int main(int argc, char **argv) {
             }
             tick_no++;
             if (scene) wscene_tick(scene);
-            wsound_engine(phase == RACING, whud_speed_shown(hud));
+            wsound_engine(phase == RACING && !fin_state, whud_speed_shown(hud));
+
+            /* water submerge (surface 6 / 0xF, not airborne): splash on the
+             * way in and out, the surface's effect-B frames over the kart,
+             * and the gurgle each time the 8-frame cycle wraps */
+            {
+                uint32_t sfc = player.surface;
+                bool wet = (sfc == 6 || sfc == 0xF) && player.hop_state == 0 &&
+                           TB.effects && sfc < 64 && TB.sdx_effB_n[sfc] > 0;
+                if (wet && !sink_on) {
+                    sink_on = 1;
+                    sink_frame = 0;
+                    wsound_play(WSND_SPLASH);
+                } else if (!wet && sink_on) {
+                    sink_on = 0;
+                    wsound_play(WSND_SPLASH);
+                } else if (sink_on) {
+                    sink_frame++;
+                    if (sink_frame % TB.sdx_effB_n[sfc] == 0)
+                        wsound_play(0x0E);         /* the drowning gurgle */
+                }
+            }
             if (ai) {
                 int32_t pprog = (int32_t)(lap - 1) * track.pos_max + prev_prog;
                 wai_tick(ai, &TB, pprog, 1);
@@ -487,22 +518,38 @@ int main(int argc, char **argv) {
                 if (prog != prev_prog) prev_prog = prog;
             }
             /* race over: the player crossed the line on the last lap. Rank
-             * everyone by progress and hand the flow back to the menu. */
-            if (menu && lap > race_laps && phase == RACING) {
+             * everyone by progress, then run the finish sequence: the
+             * character spins away from the camera while rising, waves at
+             * the camera, and drives back down off the screen. */
+            if (menu && lap > race_laps && phase == RACING && fin_state == 0) {
                 int32_t progs[8];
                 progs[0] = (int32_t)(lap - 1) * track.pos_max + prev_prog;
                 for (int k = 1; k < 8; k++)
                     progs[k] = ai ? wai_progress_of(ai, k) : 0;
-                int places[8];
                 for (int k = 0; k < 8; k++) {
-                    places[k] = 1;
+                    fin_places[k] = 1;
                     for (int j = 0; j < 8; j++)
-                        if (j != k && progs[j] > progs[k]) places[k]++;
+                        if (j != k && progs[j] > progs[k]) fin_places[k]++;
                 }
                 wsound_engine(0, 0);
                 wsound_play(kart_id);            /* the driver celebrates */
-                wmenu_race_done(menu, places);
-                continue;
+                fin_state = 1;
+                fin_y = 0xC0;
+                fin_frame = 0;
+            } else if (fin_state == 1) {
+                fin_frame = (fin_frame + 1) & 7;   /* character spin frames */
+                fin_y -= 6;
+                if (fin_y < 0x73) { fin_y = 0x72; fin_state = 2; fin_hold = 0; }
+            } else if (fin_state == 2) {
+                if (++fin_hold > 10) { fin_state = 3; fin_frame = 0; }
+            } else if (fin_state == 3) {
+                fin_frame = (fin_frame + 1) % WAVE_N[kart_id];
+                fin_y += 4;
+                if (fin_y > 199) {
+                    fin_state = 0;
+                    wmenu_race_done(menu, fin_places);
+                    continue;
+                }
             }
             /* color cycling driver (WW.EXE FUN_00028668): cnt60 doubles as the
              * enable flag (GAM line 25) and the group-A tick counter */
@@ -536,7 +583,7 @@ int main(int argc, char **argv) {
                 render_view(&track, &player);
                 if (scene)
                     wscene_draw(fb, scene, &track, &TB, &player, cars_raw,
-                                kart_id, ai, weap);
+                                kart_id, ai, weap, char_raw);
                 /* 5-position steering animation (SPR_IDLE, anim state 5):
                  * 0,1 = char lean-left pair, 2 = CARS rear view,
                  * 3,4 = char lean-right pair; steps 1 frame/tick */
@@ -560,6 +607,17 @@ int main(int argc, char **argv) {
                  * bounce offset */
                 int bounce = (player.speed > 0 && (tick_no & 1)) ? 1 : 0;
                 int lift = player.hop_height + bounce;
+                /* finish sequence: the character's own frames — spin set
+                 * (SP frames 4..11) rising away, then the wave set (12..)
+                 * coming back toward the camera (FUN_00026a3c states) */
+                if (fin_state && char_raw[kart_id]) {
+                    int f = fin_state == 1 ? 4 + fin_frame : 12 + fin_frame;
+                    kf = char_raw[kart_id] + (size_t)f * KART_W * KART_H;
+                    lift = 0xC0 - fin_y;
+                }
+                /* submerged: the water surface's effect frames replace the
+                 * kart entirely (the +0x44 branch of the kart draw) */
+                if (sink_on) kf = NULL;
                 /* engine effect: drawn only while moving (speed != 0), frames
                  * cycle per tick; sprite set comes from the surface under the
                  * kart, so it becomes dust off-road */
@@ -569,7 +627,21 @@ int main(int argc, char **argv) {
                 int dx0 = WW_SCREEN_W / 2 - KART_W / 2;   /* display x */
                 int dy0 = 192 - KART_H - lift;            /* display y */
                 bool overlays = player.hop_state == 0 && !player.in_water &&
-                                player.spin_dir == 0 && player.drift == 0;
+                                player.spin_dir == 0 && player.drift == 0 &&
+                                !fin_state && !sink_on;
+                if (sink_on) {
+                    uint32_t sfc = player.surface;
+                    if (sfc < 64 && TB.sdx_effB_n[sfc] > 0) {
+                        uint32_t off = TB.sdx_effB_off[sfc] +
+                            (uint32_t)(sink_frame % TB.sdx_effB_n[sfc]) *
+                            TB.sdx_effB_size[sfc];
+                        if (off + (uint32_t)(TB.sdx_effB_w[sfc] * TB.sdx_effB_h[sfc])
+                                <= TB.effects_len)
+                            draw_effect(TB.effects + off, track.dac,
+                                        TB.sdx_effB_w[sfc], TB.sdx_effB_h[sfc],
+                                        dx0 + 3, 192 - TB.sdx_effB_h[sfc]);
+                    }
+                }
 
                 /* exhaust (FUN_00024afc): 18x13, two copies 0xb apart at
                  * (x+5, y+0xb). Sprite set by engine state / throttle. */
@@ -592,7 +664,7 @@ int main(int argc, char **argv) {
                 /* collision sparks (kart draw, scrapeState branch): 10x9 at
                  * the kart's left edge (state 3) or right edge +0x1E (4),
                  * displayY + 0x10 */
-                if (spark && player.scrape_state) {
+                if (spark && player.scrape_state && !fin_state && !sink_on) {
                     int sx = player.scrape_state == 3 ? dx0 : dx0 + 0x1E;
                     draw_effect(spark + (size_t)player.scrape_cnt * 0x5A,
                                 track.dac, 10, 9, sx, dy0 + 0x10);
@@ -618,6 +690,7 @@ int main(int argc, char **argv) {
                 /* skid/drift smoke (descriptor A): one copy at (x, y+0x10)
                  * while the drift/spin frames are showing */
                 if (TB.effects && player.speed != 0 && sf < 64 &&
+                    !fin_state && !sink_on &&
                     (player.drift || player.spin_dir) &&
                     TB.sdx_effA_n[sf] > 0 && TB.sdx_effA_size[sf] > 0) {
                     int w = TB.sdx_effA_w[sf], h = TB.sdx_effA_h[sf];
@@ -633,7 +706,7 @@ int main(int argc, char **argv) {
                     .race_ticks = phase == RACING ? race_ticks10 : 0,
                     .lap = lap, .total_laps = race_laps, .place = place,
                     .lives = 3, .wrong_way = wrong_way,
-                    .finished = 0, .racing = phase == RACING,
+                    .finished = fin_state != 0, .racing = phase == RACING,
                 };
                 whud_draw_static(fb, hud, &track);
                 whud_draw(fb, hud, &track, &player, ai, &hs);
