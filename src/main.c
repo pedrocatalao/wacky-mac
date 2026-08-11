@@ -265,7 +265,7 @@ int main(int argc, char **argv) {
     /* the full game flow (logos, menus, championship) runs unless a track
      * was named on the command line — that form keeps the old direct-to-race
      * behaviour for testing */
-    WMenu *menu = (argc <= 2 && !dump_path) ? wmenu_create(&dat) : NULL;
+    WMenu *menu = (argc <= 2 && !dump_path) ? wmenu_create(&dat, &TB) : NULL;
     bool need_load = menu == NULL, running = true;
     double acc_ms = TICK_MS;   /* render first frame immediately */
     Uint64 prev = SDL_GetPerformanceCounter();

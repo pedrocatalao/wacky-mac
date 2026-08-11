@@ -270,7 +270,7 @@ void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
 typedef struct WSound WSound;
 /* ---- game flow: logos, menus, championship (menu.c) ---- */
 typedef struct WMenu WMenu;
-WMenu *wmenu_create(const WDat *dat);
+WMenu *wmenu_create(const WDat *dat, const WTables *tb);
 void   wmenu_free(WMenu *m);
 bool   wmenu_active(const WMenu *m);
 bool   wmenu_quit(const WMenu *m);

@@ -14,7 +14,6 @@
 #include "wacky.h"
 
 #include <SDL.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,17 +56,20 @@ struct WMenu {
     int quit;
     char cur_song[16];      /* dedupe so screen changes don't restart music */
     /* Apogee intro animation (FUN_000348f4/FUN_000347b4): the screen image
-     * is tiled into the ray-caster's world and the camera flies over it in
-     * a circle, while the logo band reveals on top and the "APOGEE MEANS
-     * ACTION" banner flies in and parks above the spinning ground */
+     * is tiled into the ray-caster's world and the camera pivots over it,
+     * while the logo band reveals on top and the "APOGEE MEANS ACTION"
+     * banner flies in and parks above the spinning ground. All state below
+     * is in the original's units and stepped at its 19.4 Hz frame rate. */
+    const WTables *tb;      /* TRIG/NDIST for the ground and the pivot */
     const uint8_t *action;  /* ACTION.SP: 251x6 column-major banner */
-    int ap_y;               /* reveal top edge, 130 -> 0 */
-    int ap_hold;            /* circling frames until the banner appears */
-    int ap_flying;          /* banner on screen */
-    int ap_dist;            /* banner approach distance, 1122 -> 140 */
-    int ap_alt;             /* banner approach altitude x3 (60 -> 0) */
-    double ap_cx, ap_cy;    /* camera world position */
-    double ap_th;           /* camera angle */
+    int ap_bw[10], ap_bh[10];  /* 251X6.INF scale bucket sizes */
+    int ap_y;               /* reveal band top: 0x81 -> 0 */
+    int ap_ang;             /* camera angle, 1920 units (starts 0x5A0) */
+    int32_t ap_px, ap_py;   /* camera position (starts 0xBCC, 0x834) */
+    int ap_circ;            /* frames circled, for the banner cue */
+    int ap_flying;
+    int ap_dist;            /* banner distance 0x462 -> 0x8C */
+    int ap_alt;             /* banner altitude 0x3C -> 0 */
 };
 
 /* the original keeps a song playing across related screens; only start a
@@ -232,14 +234,14 @@ static void enter(WMenu *m, int state) {
     case FL_LOGO_APOGEE:
         load_bg(m, "APOG1.PCX");
         menu_music(m, "APOGEE", 0);            /* one-shot fanfare */
-        m->ap_y = 130;
-        m->ap_hold = 0;
+        m->ap_y = 0x81;                 /* reveal band top */
+        m->ap_ang = 0x5A0;              /* FUN_000348f4's start state */
+        m->ap_px = 0xBCC;
+        m->ap_py = 0x834;
+        m->ap_circ = 0;
         m->ap_flying = 0;
-        m->ap_dist = 1122;
-        m->ap_alt = 180;
-        m->ap_cx = 0xBCC;               /* the original's start position  */
-        m->ap_cy = 0x834;
-        m->ap_th = 0x5A0 * 2.0 * M_PI / 1920.0;   /* and heading (270 deg) */
+        m->ap_dist = 0x462;
+        m->ap_alt = 0x3C;
         break;
     case FL_LOGO_BEAVIS:
         load_bg(m, "BEAVIS.PCX");
@@ -293,14 +295,28 @@ static void start_championship(WMenu *m) {
 
 /* ---- public API -------------------------------------------------------- */
 
-WMenu *wmenu_create(const WDat *dat) {
+WMenu *wmenu_create(const WDat *dat, const WTables *tb) {
     WMenu *m = calloc(1, sizeof *m);
     if (!m) return NULL;
     m->dat = dat;
+    m->tb = tb;
     m->wfont = wdat_find(dat, "WFONT1.SP", NULL);
     m->ofont = wdat_find(dat, "OFONT.SP", NULL);
     m->cars = wdat_find(dat, "CARS.SP", NULL);
     m->action = wdat_find(dat, "ACTION.SP", NULL);
+    /* banner scale buckets straight from 251X6.INF */
+    {
+        uint32_t len;
+        const uint8_t *inf = wdat_find(dat, "251X6.INF", &len);
+        uint32_t p = 0;
+        for (int b = 0; b < 10; b++) {
+            if (!inf || p + 4 > len) { m->ap_bw[b] = 251; m->ap_bh[b] = 6; continue; }
+            int w = inf[p] | inf[p + 1] << 8, h = inf[p + 2] | inf[p + 3] << 8;
+            m->ap_bw[b] = w;
+            m->ap_bh[b] = h;
+            p += 4 + (uint32_t)(h + 1) * w * 4;
+        }
+    }
     m->cls = 1;
     m->laps = 6;
     enter(m, FL_LOGO_APOGEE);
@@ -445,66 +461,74 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
     switch (m->state) {
     case FL_LOGO_APOGEE: {
         /* The original (FUN_000348f4): FUN_000347b4 grabs the screen as
-         * 32x32 tiles and tiles the ray-caster's whole world with them, so
-         * the ground rows become the Apogee image itself, flown over by the
-         * camera. The logo band reveals on top; after the reveal the camera
-         * circles (angle +0x1E per frame) and the MEANS ACTION banner flies
-         * in and parks above the spinning ground. */
-
-        /* camera path: forward drift while revealing, then the circle */
-        if (m->ap_y > 0) {
-            m->ap_y -= 2;
-            if (m->ap_y < 0) m->ap_y = 0;
-            m->ap_cy += 2.0;                /* DAT_00088b0e += 6 at 19 Hz */
-        } else {
-            double step = 2.0 * M_PI * 30.0 / 1920.0 / 3.0;
-            m->ap_cx += 350.0 * (cos(m->ap_th) - cos(m->ap_th + step));
-            m->ap_cy += 350.0 * (sin(m->ap_th) - sin(m->ap_th + step));
-            m->ap_th += step;
-            if (!m->ap_flying && ++m->ap_hold >= 12) {
-                m->ap_flying = 1;           /* four original frames in */
-                wsound_play(WSND_WARP);
+         * 32x32 tiles and tiles the ray-caster's 128x128 world with them
+         * (block r%6, c%10), so the ground rows are the Apogee image
+         * itself. The camera pivots about the point NDIST[0] ahead at
+         * +0x1E per frame; the logo band reveals on top; the MEANS ACTION
+         * banner flies in (0x462 -> 0x8C, -100 per frame) and parks. The
+         * original runs at 136/7 = 19.4 Hz - step every third frame. */
+        if (m->frame % 3 == 0) {
+            if (m->ap_y > 0) {
+                m->ap_y -= 6;              /* reveal: 6 rows per frame */
+                if (m->ap_y < 0) m->ap_y = 0;
+                m->ap_py += 6;             /* forward drift while revealing */
+            } else if (m->tb) {
+                int32_t nd0 = m->tb->ndist[0];
+                int oa = m->ap_ang, na = (oa + 0x1E) % 1920;
+                m->ap_px += (int32_t)((m->tb->cosq[oa] * nd0 + 0x8000) >> 16) -
+                            (int32_t)((m->tb->cosq[na] * nd0 + 0x8000) >> 16);
+                m->ap_py += (int32_t)((m->tb->sinq[oa] * nd0 + 0x8000) >> 16) -
+                            (int32_t)((m->tb->sinq[na] * nd0 + 0x8000) >> 16);
+                m->ap_ang = na;
+                if (++m->ap_circ > 3 && !m->ap_flying) {
+                    m->ap_flying = 1;      /* DAT_0007ec64 > 3: banner cue */
+                    wsound_play(WSND_WARP);
+                }
+            }
+            if (m->ap_flying) {
+                if (m->ap_alt > 0) m->ap_alt -= 4;
+                if (m->ap_alt < 0) m->ap_alt = 0;
+                m->ap_dist -= 100;
+                if (m->ap_dist < 0x8C) m->ap_dist = 0x8C;
             }
         }
 
-        /* ground rows 130..199: perspective sweep over the tiled image */
-        {
-            double dirx = cos(m->ap_th), diry = sin(m->ap_th);
-            double perx = -diry, pery = dirx;
-            for (int row = 130; row < 200; row++) {
-                double d = 10374.0 / (row - 121);
-                double half = d * 0.57735;             /* 60 degree FOV */
-                double bx = m->ap_cx + dirx * d, by = m->ap_cy + diry * d;
-                double sxs = half / 160.0;
-                uint32_t *out = fb + (size_t)row * WW_SCREEN_W;
-                for (int x = 0; x < WW_SCREEN_W; x++) {
-                    double f = (x - 160) * sxs;
-                    int wx = (int)(bx + perx * f), wy = (int)(by + pery * f);
-                    /* world tiles repeat the 320x192 screen grab */
-                    int tx = ((wx % 320) + 320) % 320;
-                    int ty = ((wy % 192) + 192) % 192;
-                    out[x] = rgba(m->bg.pal, m->bg.pixels[ty * WW_SCREEN_W + tx]);
+        /* ground rows 130..199: the real column ray-caster over the tiled
+         * image (one TRIG unit per column, NDIST distances per column) */
+        if (m->tb && m->bg.pixels) {
+            for (int col = 0; col < WW_SCREEN_W; col++) {
+                int a = (m->ap_ang - 160 + col + 1920) % 1920;
+                int32_t cq = m->tb->cosq[a], sq = m->tb->sinq[a];
+                const int32_t *nd = m->tb->ndist + (size_t)col * WW_GROUND_ROWS;
+                for (int k = 0; k < WW_GROUND_ROWS; k++) {
+                    int32_t d = nd[k];
+                    uint16_t wx = (uint16_t)(m->ap_px + ((cq * d) >> 16)) & 0xFFF;
+                    uint16_t wy = (uint16_t)(m->ap_py + ((sq * d) >> 16)) & 0xFFF;
+                    int tx = ((wx >> 5) % 10) * 32 + (wx & 31);
+                    int ty = ((wy >> 5) % 6) * 32 + (wy & 31);
+                    fb[(size_t)(WW_SCREEN_H - 1 - k) * WW_SCREEN_W + col] =
+                        rgba(m->bg.pal, m->bg.pixels[ty * WW_SCREEN_W + tx]);
                 }
             }
         }
-        /* logo band above: black until revealed */
-        for (int y = 0; y < m->ap_y; y++)
+        /* logo band above: rows [ap_y..130) revealed, black before that */
+        for (int y = 0; y < m->ap_y && y < 130; y++)
             memset(fb + (size_t)y * WW_SCREEN_W, 0, WW_SCREEN_W * 4);
 
-        /* the banner flies in once and stays put (iVar5 clamps at 0x8C) */
+        /* the banner (FUN_000343a0): bucket size from 251X6.INF, screen y
+         * from the computed table y(d) = 120 + h/2, h = round(18000/d)
+         * clamped to 21..240 (FUN_000274a4) */
         if (m->ap_flying && m->action) {
-            if (m->ap_dist > 140) {
-                m->ap_dist -= 33;
-                if (m->ap_dist < 140) m->ap_dist = 140;
-            }
-            if (m->ap_alt > 0) m->ap_alt -= 4;
-            double z = m->ap_dist;
-            double scale = 133.0 / z;
-            int w = (int)(251 * scale), h = (int)(6 * scale);
-            if (w < 8) w = 8;
-            if (h < 2) h = 2;
-            int gy = 121 + (int)(10374.0 / z);
-            int ty = gy - h - m->ap_alt / 3 * 266 / (int)z;
+            int d = m->ap_dist;
+            int b = (d - 0x7C) / 0x46;
+            if (b < 0) b = 0;
+            if (b > 9) b = 9;
+            int w = m->ap_bw[b], h = m->ap_bh[b];
+            int hh = (18000 + d / 2) / d;
+            if (hh < 0x15) hh = 0x15;
+            if (hh > 0xF0) hh = 0xF0;
+            int gy = 0x78 - hh / 2 + hh;
+            int ty = gy - h - m->ap_alt;
             for (int c = 0; c < w; c++)
                 for (int r = 0; r < h; r++) {
                     uint8_t p = m->action[(size_t)(c * 251 / w) * 6 + r * 6 / h];
