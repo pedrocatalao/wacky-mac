@@ -533,7 +533,9 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
                 for (int r = 0; r < h; r++) {
                     uint8_t p = m->action[(size_t)(c * 251 / w) * 6 + r * 6 / h];
                     if (!p) continue;
-                    int sx = 160 - w / 2 + c, sy = ty + r;
+                    /* the original draws about center x=133 (left edge 8
+                     * at full size - measured from the real screen) */
+                    int sx = 133 - w / 2 + c, sy = ty + r;
                     if (sx < 0 || sx >= WW_SCREEN_W || sy < 0 || sy >= WW_SCREEN_H)
                         continue;
                     fb[sy * WW_SCREEN_W + sx] = rgba(m->bg.pal, p);
