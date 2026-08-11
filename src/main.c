@@ -169,6 +169,7 @@ static bool intro_step(WPhys *p, const WTables *tb, WScene *scene) {
         if (light_tick >= 0x22) {
             if (scene) {
                 wscene_set_light(scene, 2, 1);
+                wsound_play(WSND_START);   /* GO! */
                 wscene_set_player_sprite(scene, 0, 0, 0, 0, 0);
             }
             phase = RACING;
