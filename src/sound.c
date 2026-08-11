@@ -125,7 +125,7 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
         if (!vo->active || !vo->s) continue;
         for (int i = 0; i < n; i++) {
             if (vo->pos >= vo->s->len) { vo->active = 0; break; }
-            acc[i] += (int16_t)((int)vo->s->pcm[vo->pos++] - 128) << 6;
+            acc[i] += (int16_t)((int)vo->s->pcm[vo->pos++] - 128) << 7;
         }
     }
     /* engine loop */
@@ -133,7 +133,7 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
         for (int i = 0; i < n; i++) {
             uint32_t idx = s->eng.pos_fp >> 16;
             if (idx >= s->eng.smp.len) { s->eng.pos_fp = 0; idx = 0; }
-            acc[i] += (int16_t)((int)s->eng.smp.pcm[idx] - 128) << 5;
+            acc[i] += (int16_t)((int)s->eng.smp.pcm[idx] - 128) << 6;
             s->eng.pos_fp += s->eng.step_fp;
         }
     }
@@ -141,7 +141,7 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
     if (s->music) {
         int16_t mus[4096];
         wklm_render(s->music, mus, n);
-        for (int i = 0; i < n; i++) acc[i] += mus[i] >> 1;
+        for (int i = 0; i < n; i++) acc[i] += mus[i];
     }
 
     int16_t *dst = (int16_t *)stream;
