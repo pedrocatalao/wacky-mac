@@ -16,6 +16,13 @@
 
 #define MAX_VOICES 8
 
+/* The original's digitized driver is initialised at 11000 Hz
+ * (FUN_000336c8 -> FUN_00041820(..., 11000)) and its sound-table records
+ * hold only {buffer, cents=0, priority} - no rate. Every effect is played
+ * raw at the mixer rate, so the VOC headers' 8000/10000 Hz tags are
+ * ignored on purpose; honouring them plays everything slow and deep. */
+#define WW_SFX_RATE 11000
+
 static const char *SOUND_NAME[WSND_COUNT] = {
     "UNO",   "SULTAN", "MORRIS", "PEGGLES", "RAZER", "RINGO", "BLOMBO", "TIGI",
     "PASS",  "BELL",   "START",  "GLASS",   "WARP",  "BOOM",  "HORN",   "SPLASH",
@@ -173,13 +180,14 @@ WSound *wsound_create(const WDat *dat) {
         uint32_t n;
         int rate;
         if (!voc_decode(d, len, &pcm, &n, &rate)) continue;
-        /* nearest-neighbour resample to the device rate */
-        if (rate != s->rate && rate > 0) {
-            uint32_t on = (uint32_t)((uint64_t)n * s->rate / rate);
+        /* nearest-neighbour resample from the driver rate to the device;
+         * the decoded VOC rate is deliberately ignored (see WW_SFX_RATE) */
+        if (WW_SFX_RATE != s->rate) {
+            uint32_t on = (uint32_t)((uint64_t)n * s->rate / WW_SFX_RATE);
             uint8_t *o = malloc(on ? on : 1);
             if (o) {
                 for (uint32_t k = 0; k < on; k++)
-                    o[k] = pcm[(uint64_t)k * rate / s->rate];
+                    o[k] = pcm[(uint64_t)k * WW_SFX_RATE / s->rate];
                 free(pcm);
                 pcm = o;
                 n = on;
@@ -194,12 +202,12 @@ WSound *wsound_create(const WDat *dat) {
         const uint8_t *d = wdat_find(dat, "MOTOR.VOC", &len);
         uint8_t *pcm; uint32_t n; int rate;
         if (d && voc_decode(d, len, &pcm, &n, &rate)) {
-            if (rate != s->rate && rate > 0) {
-                uint32_t on2 = (uint32_t)((uint64_t)n * s->rate / rate);
+            if (WW_SFX_RATE != s->rate) {
+                uint32_t on2 = (uint32_t)((uint64_t)n * s->rate / WW_SFX_RATE);
                 uint8_t *o = malloc(on2 ? on2 : 1);
                 if (o) {
                     for (uint32_t k = 0; k < on2; k++)
-                        o[k] = pcm[(uint64_t)k * rate / s->rate];
+                        o[k] = pcm[(uint64_t)k * WW_SFX_RATE / s->rate];
                     free(pcm); pcm = o; n = on2;
                 }
             }
