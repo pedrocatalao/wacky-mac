@@ -56,16 +56,18 @@ struct WMenu {
     int race_request;
     int quit;
     char cur_song[16];      /* dedupe so screen changes don't restart music */
-    /* Apogee intro animation (FUN_000347b4): curtain reveal of the logo,
-     * then the "APOGEE MEANS ACTION" banner circling in 3D */
+    /* Apogee intro animation (FUN_000348f4/FUN_000347b4): the screen image
+     * is tiled into the ray-caster's world and the camera flies over it in
+     * a circle, while the logo band reveals on top and the "APOGEE MEANS
+     * ACTION" banner flies in and parks above the spinning ground */
     const uint8_t *action;  /* ACTION.SP: 251x6 column-major banner */
     int ap_y;               /* reveal top edge, 130 -> 0 */
-    int ap_hold;            /* frames since the reveal finished */
-    int ap_flying;
-    int ap_dist;            /* approach distance, 1122 -> 140 */
-    int ap_alt;             /* approach altitude offset x3 (60 -> 0) */
-    double ap_ang;          /* orbit angle */
-    int ap_passes;          /* completed orbits */
+    int ap_hold;            /* circling frames until the banner appears */
+    int ap_flying;          /* banner on screen */
+    int ap_dist;            /* banner approach distance, 1122 -> 140 */
+    int ap_alt;             /* banner approach altitude x3 (60 -> 0) */
+    double ap_cx, ap_cy;    /* camera world position */
+    double ap_th;           /* camera angle */
 };
 
 /* the original keeps a song playing across related screens; only start a
@@ -235,8 +237,9 @@ static void enter(WMenu *m, int state) {
         m->ap_flying = 0;
         m->ap_dist = 1122;
         m->ap_alt = 180;
-        m->ap_ang = 0;
-        m->ap_passes = 0;
+        m->ap_cx = 0xBCC;               /* the original's start position  */
+        m->ap_cy = 0x834;
+        m->ap_th = 0x5A0 * 2.0 * M_PI / 1920.0;   /* and heading (270 deg) */
         break;
     case FL_LOGO_BEAVIS:
         load_bg(m, "BEAVIS.PCX");
@@ -441,58 +444,79 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
 
     switch (m->state) {
     case FL_LOGO_APOGEE: {
-        /* curtain reveal: the logo area (rows 0..129) rises into view from
-         * line 130 upward, 6 rows per original frame (~2/frame at 60 Hz) */
+        /* The original (FUN_000348f4): FUN_000347b4 grabs the screen as
+         * 32x32 tiles and tiles the ray-caster's whole world with them, so
+         * the ground rows become the Apogee image itself, flown over by the
+         * camera. The logo band reveals on top; after the reveal the camera
+         * circles (angle +0x1E per frame) and the MEANS ACTION banner flies
+         * in and parks above the spinning ground. */
+
+        /* camera path: forward drift while revealing, then the circle */
         if (m->ap_y > 0) {
             m->ap_y -= 2;
             if (m->ap_y < 0) m->ap_y = 0;
-        } else if (!m->ap_flying && ++m->ap_hold >= 12) {
-            m->ap_flying = 1;               /* four original frames later */
-            wsound_play(WSND_WARP);
+            m->ap_cy += 2.0;                /* DAT_00088b0e += 6 at 19 Hz */
+        } else {
+            double step = 2.0 * M_PI * 30.0 / 1920.0 / 3.0;
+            m->ap_cx += 350.0 * (cos(m->ap_th) - cos(m->ap_th + step));
+            m->ap_cy += 350.0 * (sin(m->ap_th) - sin(m->ap_th + step));
+            m->ap_th += step;
+            if (!m->ap_flying && ++m->ap_hold >= 12) {
+                m->ap_flying = 1;           /* four original frames in */
+                wsound_play(WSND_WARP);
+            }
         }
+
+        /* ground rows 130..199: perspective sweep over the tiled image */
+        {
+            double dirx = cos(m->ap_th), diry = sin(m->ap_th);
+            double perx = -diry, pery = dirx;
+            for (int row = 130; row < 200; row++) {
+                double d = 10374.0 / (row - 121);
+                double half = d * 0.57735;             /* 60 degree FOV */
+                double bx = m->ap_cx + dirx * d, by = m->ap_cy + diry * d;
+                double sxs = half / 160.0;
+                uint32_t *out = fb + (size_t)row * WW_SCREEN_W;
+                for (int x = 0; x < WW_SCREEN_W; x++) {
+                    double f = (x - 160) * sxs;
+                    int wx = (int)(bx + perx * f), wy = (int)(by + pery * f);
+                    /* world tiles repeat the 320x192 screen grab */
+                    int tx = ((wx % 320) + 320) % 320;
+                    int ty = ((wy % 192) + 192) % 192;
+                    out[x] = rgba(m->bg.pal, m->bg.pixels[ty * WW_SCREEN_W + tx]);
+                }
+            }
+        }
+        /* logo band above: black until revealed */
         for (int y = 0; y < m->ap_y; y++)
             memset(fb + (size_t)y * WW_SCREEN_W, 0, WW_SCREEN_W * 4);
 
-        /* the "APOGEE MEANS ACTION" banner: flies in from the distance and
-         * keeps circling until the fanfare has finished */
+        /* the banner flies in once and stays put (iVar5 clamps at 0x8C) */
         if (m->ap_flying && m->action) {
-            double z;
-            if (m->ap_dist > 140) {         /* approach: -100 per frame */
+            if (m->ap_dist > 140) {
                 m->ap_dist -= 33;
                 if (m->ap_dist < 140) m->ap_dist = 140;
-                if (m->ap_alt > 0) m->ap_alt -= 4;
-                z = m->ap_dist;
-            } else {
-                double prev = m->ap_ang;
-                m->ap_ang += 2.0 * M_PI / 192.0;   /* 0x1E of 1920 units */
-                if (m->ap_ang >= 2.0 * M_PI) {
-                    m->ap_ang -= 2.0 * M_PI;
-                    m->ap_passes++;
-                }
-                (void)prev;
-                z = 620.0 - 480.0 * cos(m->ap_ang);
             }
+            if (m->ap_alt > 0) m->ap_alt -= 4;
+            double z = m->ap_dist;
             double scale = 133.0 / z;
             int w = (int)(251 * scale), h = (int)(6 * scale);
             if (w < 8) w = 8;
-            if (h < 1) h = 1;
-            int cx = 160 + (int)(480.0 * sin(m->ap_ang) * 160.0 / z);
+            if (h < 2) h = 2;
             int gy = 121 + (int)(10374.0 / z);
-            int ty = gy - h - (m->ap_alt / 3 * 133 * 2 / (int)z);
+            int ty = gy - h - m->ap_alt / 3 * 266 / (int)z;
             for (int c = 0; c < w; c++)
                 for (int r = 0; r < h; r++) {
                     uint8_t p = m->action[(size_t)(c * 251 / w) * 6 + r * 6 / h];
                     if (!p) continue;
-                    int sx = cx - w / 2 + c, sy = ty + r;
-                    if (sx < 0 || sx >= WW_SCREEN_W || sy < m->ap_y || sy >= WW_SCREEN_H)
+                    int sx = 160 - w / 2 + c, sy = ty + r;
+                    if (sx < 0 || sx >= WW_SCREEN_W || sy < 0 || sy >= WW_SCREEN_H)
                         continue;
                     fb[sy * WW_SCREEN_W + sx] = rgba(m->bg.pal, p);
                 }
         }
-        /* like the original: leave when the fanfare is over (and the banner
-         * has done its rounds); a long timeout as a safety net */
-        if ((m->ap_flying && !wsound_music_playing() && m->ap_passes >= 1) ||
-            m->frame > 900)
+        /* leave when the fanfare finishes, like the original */
+        if ((m->ap_flying && !wsound_music_playing()) || m->frame > 900)
             enter(m, FL_LOGO_BEAVIS);
         break;
     }
