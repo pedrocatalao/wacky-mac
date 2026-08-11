@@ -146,7 +146,10 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
 
     int16_t *dst = (int16_t *)stream;
     for (int i = 0; i < n; i++) {
-        int v = acc[i];
+        /* master gain with a soft knee: bursts compress instead of crack */
+        int v = acc[i] * 7 / 4;
+        if (v > 24576) v = 24576 + (v - 24576) / 4;
+        else if (v < -24576) v = -24576 + (v + 24576) / 4;
         if (v > 32767) v = 32767;
         if (v < -32768) v = -32768;
         dst[i] = (int16_t)v;
