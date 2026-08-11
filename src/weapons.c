@@ -186,7 +186,11 @@ void wweap_fire(WWeapons *w, WPhys *p, const WTrack *t, const WTables *tb,
     if (!fire_btn) return;
     if (p->hop_state) return;
     if (w->live) return;
-    if (p->weapon_id == 0 && p->ammo == 0) { if (sound_out) *sound_out = 0x1A; return; }
+    if (p->weapon_id == 0 && p->ammo == 0) {
+        if (sound_out) *sound_out = WSND_NOAMMO;
+        wsound_play(WSND_NOAMMO);
+        return;
+    }
 
     int wid = p->weapon_id;
     if (wid > 8) return;
@@ -237,6 +241,7 @@ void wweap_fire(WWeapons *w, WPhys *p, const WTrack *t, const WTables *tb,
     }
 
     if (sound_out) *sound_out = sfx;
+    if (sfx >= 0) wsound_play(sfx);
     if (p->weapon_id == 0) p->ammo--;
     else                   p->weapon_id = 0;    /* specials are single use */
 }
@@ -278,6 +283,7 @@ void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
         if (hit) {
             if (hit == 3 && victim >= 0)
                 wai_kart_hit(col->kart_ctx, victim, pr->type == 5 ? 2 : 1, tick);
+            if (hit == 3 && victim >= 0 && pr->type == 5) wsound_play(WSND_STALL);
             /* the player spins out when struck (human-victim branch of
              * ProjProbe); the spin machinery is already in the physics */
             if (struck_player && player && player->spin_dir == 0) {
@@ -287,6 +293,7 @@ void wweap_tick(WWeapons *w, const WTrack *t, const WTables *tb,
                 player->drift = 0;
                 player->hold_l = player->hold_r = 0;
             }
+            wsound_play(WSND_PUF);
             if (w->live > 0) w->live--;
             pr->state = 0xFF;
             pr->frame_count = 3;

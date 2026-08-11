@@ -74,14 +74,16 @@ static void whisker_respond(const PhysCtx *c, WPhys *p) {
     int hitL, hitR;
     whisker_check(c, p, &hitL, &hitR);
     if (hitL) {
-        if (p->scrape_state == 0) { p->scrape_state = 4; p->scrape_cnt = 0; }
+        if (p->scrape_state == 0) { p->scrape_state = 4; p->scrape_cnt = 0;
+                                    wsound_play(WSND_CLANG); }
         p->angle = wrapa(p->angle - WHISK);
         p->posx += tscale(c->tb->cosq[p->angle], 1);
         p->posy += tscale(c->tb->sinq[p->angle], 1);
         p->scraping = 1;
     }
     if (hitR) {
-        if (p->scrape_state == 0) { p->scrape_state = 3; p->scrape_cnt = 0; }
+        if (p->scrape_state == 0) { p->scrape_state = 3; p->scrape_cnt = 0;
+                                    wsound_play(WSND_CLANG); }
         p->angle = wrapa(p->angle + WHISK);
         p->posx += tscale(c->tb->cosq[p->angle], 1);
         p->posy += tscale(c->tb->sinq[p->angle], 1);
@@ -114,6 +116,7 @@ static void probe_step(const PhysCtx *c, WPhys *p,
         p->hop_height = 8;
         p->hop_maxh = 0x28;
         p->collide = 4;
+        wsound_play(WSND_WARP);
         return;
     }
     if (s == SURF_WALL) { p->collide = 1; return; }
@@ -293,6 +296,7 @@ static void player_move(const PhysCtx *c, WPhys *p) {
         p->hop_state == 0 && !p->in_water) {
         p->in_water = 1;
         p->splash = 1;
+        wsound_play(WSND_SPLASH);
     }
 }
 
@@ -471,6 +475,7 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
         if (accel && p->turbo) accel = false;
         if (brake && p->throttle > 0) {
             accel = false;
+            if (p->throttle > 8) wsound_play(WSND_SKID);
             p->throttle -= 8;
             if (p->throttle < 0) p->throttle = 0;
             p->speed = tb->vel[p->throttle];
@@ -519,6 +524,7 @@ void wphys_tick(WPhys *p, const WTrack *t, const WTables *tb,
     /* turbo tile (surface 2) */
     if (p->surface == SURF_TURBO && p->turbo == 0) {
         p->turbo = 1;                     /* heading window check omitted (TODO) */
+        wsound_play(WSND_WARP);
         p->throttle = 0xA0;
         p->turbo_timer = 0x10;
         p->speed = tb->vel[p->throttle];

@@ -235,6 +235,8 @@ int main(int argc, char **argv) {
     WAi *ai = NULL;
     WWeapons *weap = wweap_create(&dat);
     WHud *hud = NULL;
+    WSound *snd = wsound_create(&dat);
+    if (!snd) fprintf(stderr, "audio unavailable; running silent\n");
     const uint8_t *cars_raw = wdat_find(&dat, "CARS.SP", NULL);
     /* per-character sprite files: lean frames [0..1] left, [2..3] right */
     static const char *char_names[8] = {

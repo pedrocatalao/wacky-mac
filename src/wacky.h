@@ -249,6 +249,28 @@ void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
                     WAi *ai, const WWeapons *weap);
 
+/* ---- Sound effects (src/sound.c) ----
+ * ids are the game's own (table of 12-byte name slots in WW.EXE data) */
+#define WSND_COUNT   27
+#define WSND_START   0x0A   /* green light           */
+#define WSND_WARP    0x0C   /* turbo / hop           */
+#define WSND_BOOM    0x0D   /* kart destroyed        */
+#define WSND_SPLASH  0x0F   /* water                 */
+#define WSND_SKID    0x11   /* drift / skid / brake  */
+#define WSND_PUF     0x12   /* projectile explodes   */
+#define WSND_FLAME   0x13   /* triple shot           */
+#define WSND_HOG     0x14   /* hedgehog / squasher   */
+#define WSND_CLANG   0x15   /* wall scrape           */
+#define WSND_SWIPE   0x16   /* trigger object        */
+#define WSND_DROP    0x17   /* rear drop             */
+#define WSND_STALL   0x19   /* squashed              */
+#define WSND_NOAMMO  0x1A   /* nothing to fire       */
+
+typedef struct WSound WSound;
+WSound *wsound_create(const WDat *dat);
+void    wsound_free(WSound *s);
+void    wsound_play(int id);
+
 /* ---- In-race HUD (src/hud.c) ---- */
 
 typedef struct WHud WHud;
