@@ -5,7 +5,6 @@
  */
 #include "wacky.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -425,12 +424,16 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 if (!s->squash) continue;
                 e.frame = s->squash + (size_t)hitframe * 0x428;
             } else {
-                /* passing gag (FUN_00022e50 region): the first time this
-                 * kart is close (scale bucket < 3) and clearly to one side,
-                 * it turns its head (its lean pair, toward the player) and
-                 * shouts its voice - once per kart per race */
-                if (mode == 0 && e.bucket < 3 && (e.sx < 120 || e.sx > 200) &&
-                    wai_kart_try_look(ai, k, e.sx > 160 ? 2 : 0))
+                /* passing gag (FUN_00022d70 region): when this kart is close
+                 * (scale bucket < 3) and its screen baseline is level with
+                 * or above the player's (position code 3 or 1 - it is being
+                 * caught up, not already passed), it turns its head toward
+                 * the player and shouts its voice - once per kart per race.
+                 * A kart left of centre (beyond +-4) leans right (base 2),
+                 * otherwise it leans left (base 0). */
+                if (mode == 0 && e.bucket < 3 &&
+                    s->rowtab[e.dist & 0xFFF] <= 192 &&
+                    wai_kart_try_look(ai, k, e.sx < 160 - 4 ? 2 : 0))
                     wsound_play(sprite);
                 int lframe = mode == 0 ? wai_kart_look(ai, k) : -1;
                 if (lframe >= 0 && char_px && char_px[sprite]) {
