@@ -25,6 +25,7 @@ add_executable(openwacky
     src/sound.c
     src/opl2.c
     src/klm.c
+    src/menu.c
     src/sprites.c
     src/weapons.c
     src/wdat.c

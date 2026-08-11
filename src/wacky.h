@@ -268,6 +268,18 @@ void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
 #define WSND_NOAMMO  0x1A   /* nothing to fire       */
 
 typedef struct WSound WSound;
+/* ---- game flow: logos, menus, championship (menu.c) ---- */
+typedef struct WMenu WMenu;
+WMenu *wmenu_create(const WDat *dat);
+void   wmenu_free(WMenu *m);
+bool   wmenu_active(const WMenu *m);
+bool   wmenu_quit(const WMenu *m);
+void   wmenu_key(WMenu *m, int sym);
+void   wmenu_frame(WMenu *m, uint32_t *fb);
+bool   wmenu_race_request(WMenu *m, int *track, int *laps, int *character);
+void   wmenu_race_done(WMenu *m, const int place_of_kart[8]);
+void   wmenu_race_aborted(WMenu *m);
+
 WSound *wsound_create(const WDat *dat);
 void    wsound_free(WSound *s);
 void    wsound_play(int id);

@@ -260,8 +260,13 @@ int main(int argc, char **argv) {
     int32_t race_ticks10 = 0;   /* 10 Hz race clock */
     double clock_ms = 0;
     int kart_id = 0;
+    int race_laps = 3;
     bool map_view = false;
-    bool need_load = true, running = true;
+    /* the full game flow (logos, menus, championship) runs unless a track
+     * was named on the command line — that form keeps the old direct-to-race
+     * behaviour for testing */
+    WMenu *menu = (argc <= 2 && !dump_path) ? wmenu_create(&dat) : NULL;
+    bool need_load = menu == NULL, running = true;
     double acc_ms = TICK_MS;   /* render first frame immediately */
     Uint64 prev = SDL_GetPerformanceCounter();
 
@@ -325,6 +330,13 @@ int main(int argc, char **argv) {
                     }
                 }
             }
+            /* fresh race state */
+            lap = 1;
+            prev_prog = 0;
+            wrong_way = 0;
+            place = 1;
+            race_ticks10 = 0;
+            clock_ms = 0;
             /* drop the time spent loading, or the accumulator would fire a
              * burst of catch-up ticks and eat the whole intro fly-in */
             prev = SDL_GetPerformanceCounter();
@@ -340,15 +352,47 @@ int main(int argc, char **argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) running = false;
             else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) {
+                if (menu && wmenu_active(menu)) {
+                    wmenu_key(menu, ev.key.keysym.sym);
+                    continue;
+                }
                 switch (ev.key.keysym.sym) {
-                case SDLK_ESCAPE: running = false; break;
-                case SDLK_n: tracknum = tracknum % NUM_TRACKS + 1; need_load = true; break;
-                case SDLK_p: tracknum = (tracknum + NUM_TRACKS - 2) % NUM_TRACKS + 1; need_load = true; break;
-                case SDLK_c: kart_id = (kart_id + 1) % NUM_KARTS; break;
+                case SDLK_ESCAPE:
+                    if (menu) {                  /* leave race, back to menu */
+                        wmenu_race_aborted(menu);
+                        wsound_engine(0, 0);
+                    } else running = false;
+                    break;
                 case SDLK_m: map_view = !map_view; break;
-                case SDLK_r: wphys_reset(&player, &track); break;
+                /* track/kart debug keys, direct mode only */
+                case SDLK_n: if (!menu) { tracknum = tracknum % NUM_TRACKS + 1; need_load = true; } break;
+                case SDLK_p: if (!menu) { tracknum = (tracknum + NUM_TRACKS - 2) % NUM_TRACKS + 1; need_load = true; } break;
+                case SDLK_c: if (!menu) kart_id = (kart_id + 1) % NUM_KARTS; break;
+                case SDLK_r: if (!menu) wphys_reset(&player, &track); break;
+                default: break;
                 }
             }
+        }
+
+        /* menu frames: the flow module owns the screen until a race starts */
+        if (menu && wmenu_active(menu)) {
+            if (wmenu_quit(menu)) { running = false; continue; }
+            int mt, ml, mc;
+            if (wmenu_race_request(menu, &mt, &ml, &mc)) {
+                tracknum = mt;
+                race_laps = ml;
+                kart_id = mc;
+                need_load = true;
+                continue;                        /* load and race next frame */
+            }
+            wmenu_frame(menu, fb);
+            SDL_UpdateTexture(screen_tex, NULL, fb, WW_SCREEN_W * 4);
+            SDL_RenderClear(ren);
+            SDL_RenderCopy(ren, screen_tex, NULL, NULL);
+            SDL_RenderPresent(ren);
+            prev = SDL_GetPerformanceCounter();  /* don't bank race ticks */
+            acc_ms = 0;
+            continue;
         }
 
         Uint64 now = SDL_GetPerformanceCounter();
@@ -441,6 +485,24 @@ int main(int argc, char **argv) {
                     lap--;                          /* backed over the line */
                 wrong_way = (prog < prev_prog - 1 && !(prev_prog > (int)track.pos_max * 3 / 4));
                 if (prog != prev_prog) prev_prog = prog;
+            }
+            /* race over: the player crossed the line on the last lap. Rank
+             * everyone by progress and hand the flow back to the menu. */
+            if (menu && lap > race_laps && phase == RACING) {
+                int32_t progs[8];
+                progs[0] = (int32_t)(lap - 1) * track.pos_max + prev_prog;
+                for (int k = 1; k < 8; k++)
+                    progs[k] = ai ? wai_progress_of(ai, k) : 0;
+                int places[8];
+                for (int k = 0; k < 8; k++) {
+                    places[k] = 1;
+                    for (int j = 0; j < 8; j++)
+                        if (j != k && progs[j] > progs[k]) places[k]++;
+                }
+                wsound_engine(0, 0);
+                wsound_play(kart_id);            /* the driver celebrates */
+                wmenu_race_done(menu, places);
+                continue;
             }
             /* color cycling driver (WW.EXE FUN_00028668): cnt60 doubles as the
              * enable flag (GAM line 25) and the group-A tick counter */
@@ -569,7 +631,7 @@ int main(int argc, char **argv) {
             if (!map_view) {
                 WHudState hs = {
                     .race_ticks = phase == RACING ? race_ticks10 : 0,
-                    .lap = lap, .total_laps = 3, .place = place,
+                    .lap = lap, .total_laps = race_laps, .place = place,
                     .lives = 3, .wrong_way = wrong_way,
                     .finished = 0, .racing = phase == RACING,
                 };
@@ -609,6 +671,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    wmenu_free(menu);
     wsprite_free(&cars);
     wtrack_free(&track);
     SDL_DestroyTexture(screen_tex);
