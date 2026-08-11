@@ -281,6 +281,11 @@ static void music_start(const WDat *dat, const char *base, int loop) {
 void wsound_music(const WDat *dat, const char *base) { music_start(dat, base, 1); }
 void wsound_music_once(const WDat *dat, const char *base) { music_start(dat, base, 0); }
 
+int wsound_music_playing(void) {
+    WSound *s = G;
+    return s && s->music && wklm_playing(s->music);
+}
+
 void wsound_music_stop(void) {
     WSound *s = G;
     if (!s || !s->music) return;

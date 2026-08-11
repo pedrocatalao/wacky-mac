@@ -287,6 +287,7 @@ void    wsound_engine(int on, int shown_speed);
 void    wsound_music(const WDat *dat, const char *base);       /* looped */
 void    wsound_music_once(const WDat *dat, const char *base);  /* jingle  */
 void    wsound_music_stop(void);
+int     wsound_music_playing(void);
 
 /* ---- In-race HUD (src/hud.c) ---- */
 

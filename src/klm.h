@@ -15,6 +15,7 @@ void  wklm_free(WKlm *k);
  * loop=0 stops at the terminal 0xFF like the original's one-shot jingles */
 bool  wklm_start(WKlm *k, const uint8_t *data, uint32_t len, int loop);
 void  wklm_stop(WKlm *k);
+int   wklm_playing(const WKlm *k);
 /* mono S16 at the create() rate; silence when stopped */
 void  wklm_render(WKlm *k, int16_t *out, int n);
 /* diagnostic tap: observe every OPL register write the driver makes */

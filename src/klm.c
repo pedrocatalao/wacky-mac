@@ -211,6 +211,8 @@ void wklm_free(WKlm *k) {
     free(k);
 }
 
+int wklm_playing(const WKlm *k) { return k && k->playing; }
+
 void wklm_stop(WKlm *k) {
     if (!k) return;
     k->playing = 0;

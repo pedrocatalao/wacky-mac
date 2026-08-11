@@ -14,6 +14,7 @@
 #include "wacky.h"
 
 #include <SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,6 +56,16 @@ struct WMenu {
     int race_request;
     int quit;
     char cur_song[16];      /* dedupe so screen changes don't restart music */
+    /* Apogee intro animation (FUN_000347b4): curtain reveal of the logo,
+     * then the "APOGEE MEANS ACTION" banner circling in 3D */
+    const uint8_t *action;  /* ACTION.SP: 251x6 column-major banner */
+    int ap_y;               /* reveal top edge, 130 -> 0 */
+    int ap_hold;            /* frames since the reveal finished */
+    int ap_flying;
+    int ap_dist;            /* approach distance, 1122 -> 140 */
+    int ap_alt;             /* approach altitude offset x3 (60 -> 0) */
+    double ap_ang;          /* orbit angle */
+    int ap_passes;          /* completed orbits */
 };
 
 /* the original keeps a song playing across related screens; only start a
@@ -219,6 +230,13 @@ static void enter(WMenu *m, int state) {
     case FL_LOGO_APOGEE:
         load_bg(m, "APOG1.PCX");
         menu_music(m, "APOGEE", 0);            /* one-shot fanfare */
+        m->ap_y = 130;
+        m->ap_hold = 0;
+        m->ap_flying = 0;
+        m->ap_dist = 1122;
+        m->ap_alt = 180;
+        m->ap_ang = 0;
+        m->ap_passes = 0;
         break;
     case FL_LOGO_BEAVIS:
         load_bg(m, "BEAVIS.PCX");
@@ -279,6 +297,7 @@ WMenu *wmenu_create(const WDat *dat) {
     m->wfont = wdat_find(dat, "WFONT1.SP", NULL);
     m->ofont = wdat_find(dat, "OFONT.SP", NULL);
     m->cars = wdat_find(dat, "CARS.SP", NULL);
+    m->action = wdat_find(dat, "ACTION.SP", NULL);
     m->cls = 1;
     m->laps = 6;
     enter(m, FL_LOGO_APOGEE);
@@ -421,10 +440,62 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
     draw_bg(m, fb);
 
     switch (m->state) {
-    case FL_LOGO_APOGEE:
-        /* the fanfare runs about nine seconds; any key skips */
-        if (m->frame > 540) enter(m, FL_LOGO_BEAVIS);
+    case FL_LOGO_APOGEE: {
+        /* curtain reveal: the logo area (rows 0..129) rises into view from
+         * line 130 upward, 6 rows per original frame (~2/frame at 60 Hz) */
+        if (m->ap_y > 0) {
+            m->ap_y -= 2;
+            if (m->ap_y < 0) m->ap_y = 0;
+        } else if (!m->ap_flying && ++m->ap_hold >= 12) {
+            m->ap_flying = 1;               /* four original frames later */
+            wsound_play(WSND_WARP);
+        }
+        for (int y = 0; y < m->ap_y; y++)
+            memset(fb + (size_t)y * WW_SCREEN_W, 0, WW_SCREEN_W * 4);
+
+        /* the "APOGEE MEANS ACTION" banner: flies in from the distance and
+         * keeps circling until the fanfare has finished */
+        if (m->ap_flying && m->action) {
+            double z;
+            if (m->ap_dist > 140) {         /* approach: -100 per frame */
+                m->ap_dist -= 33;
+                if (m->ap_dist < 140) m->ap_dist = 140;
+                if (m->ap_alt > 0) m->ap_alt -= 4;
+                z = m->ap_dist;
+            } else {
+                double prev = m->ap_ang;
+                m->ap_ang += 2.0 * M_PI / 192.0;   /* 0x1E of 1920 units */
+                if (m->ap_ang >= 2.0 * M_PI) {
+                    m->ap_ang -= 2.0 * M_PI;
+                    m->ap_passes++;
+                }
+                (void)prev;
+                z = 620.0 - 480.0 * cos(m->ap_ang);
+            }
+            double scale = 133.0 / z;
+            int w = (int)(251 * scale), h = (int)(6 * scale);
+            if (w < 8) w = 8;
+            if (h < 1) h = 1;
+            int cx = 160 + (int)(480.0 * sin(m->ap_ang) * 160.0 / z);
+            int gy = 121 + (int)(10374.0 / z);
+            int ty = gy - h - (m->ap_alt / 3 * 133 * 2 / (int)z);
+            for (int c = 0; c < w; c++)
+                for (int r = 0; r < h; r++) {
+                    uint8_t p = m->action[(size_t)(c * 251 / w) * 6 + r * 6 / h];
+                    if (!p) continue;
+                    int sx = cx - w / 2 + c, sy = ty + r;
+                    if (sx < 0 || sx >= WW_SCREEN_W || sy < m->ap_y || sy >= WW_SCREEN_H)
+                        continue;
+                    fb[sy * WW_SCREEN_W + sx] = rgba(m->bg.pal, p);
+                }
+        }
+        /* like the original: leave when the fanfare is over (and the banner
+         * has done its rounds); a long timeout as a safety net */
+        if ((m->ap_flying && !wsound_music_playing() && m->ap_passes >= 1) ||
+            m->frame > 900)
+            enter(m, FL_LOGO_BEAVIS);
         break;
+    }
     case FL_LOGO_BEAVIS:
         /* 0x110 ticks of the 136 Hz clock (FUN_000347b4) */
         if (m->frame > 120) enter(m, FL_TITLE);
