@@ -58,3 +58,9 @@ python3 tools/wdat.py x ../WACKY.DAT extracted
 PYTHONPATH=tools .venv/bin/python tools/wtrack.py extracted 1,2,3 tracks
 PYTHONPATH=tools .venv/bin/python tools/wsp.py extracted/CARS.SP 38 28 extracted/A_F1.PCX sprites/cars.png
 ```
+
+## Credits
+
+- Music synthesis uses [Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3)
+  by Nuke.YKT (LGPL 2.1, vendored as `src/nuked_opl3.c`) — a bit-accurate
+  emulation of the Yamaha FM chips the original game played through.

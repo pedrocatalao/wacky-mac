@@ -24,6 +24,7 @@ add_executable(openwacky
     src/hud.c
     src/sound.c
     src/opl2.c
+    src/nuked_opl3.c
     src/klm.c
     src/menu.c
     src/sprites.c

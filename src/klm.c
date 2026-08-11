@@ -64,9 +64,18 @@ struct WKlm {
     uint8_t lastA0[9], lastB0[9];   /* DAT_0009150c / DAT_000914cc      */
     int bd;                         /* DAT_0009167c rhythm key state    */
     const uint8_t *instr[KCH];      /* DAT_00091624 current instrument  */
+    void   (*log_fn)(void *ud, uint8_t reg, uint8_t val);
+    void    *log_ud;
 };
 
-static void oplw(WKlm *k, uint8_t reg, uint8_t val) { wopl_write(k->opl, reg, val); }
+void wklm_set_logger(WKlm *k, void (*fn)(void *, uint8_t, uint8_t), void *ud) {
+    if (k) { k->log_fn = fn; k->log_ud = ud; }
+}
+
+static void oplw(WKlm *k, uint8_t reg, uint8_t val) {
+    if (k->log_fn) k->log_fn(k->log_ud, reg, val);
+    wopl_write(k->opl, reg, val);
+}
 
 /* FUN_00050280: write the level register of one operator from its
  * instrument loudness scaled by the channel volume */

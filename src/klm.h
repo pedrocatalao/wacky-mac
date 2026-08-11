@@ -16,4 +16,7 @@ bool  wklm_start(WKlm *k, const uint8_t *data, uint32_t len);
 void  wklm_stop(WKlm *k);
 /* mono S16 at the create() rate; silence when stopped */
 void  wklm_render(WKlm *k, int16_t *out, int n);
+/* diagnostic tap: observe every OPL register write the driver makes */
+void  wklm_set_logger(WKlm *k, void (*fn)(void *ud, uint8_t reg, uint8_t val),
+                      void *ud);
 #endif
