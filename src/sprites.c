@@ -48,6 +48,10 @@ struct WScene {
     const uint8_t *squash;      /* GENEF.SP + 0x1DD9: 4 frames of 38x28 */
     const uint8_t *light;       /* GENEF.SP + 0x1161: start light, 3 frames */
     int      light_x, light_y, light_frame, light_on;
+    /* during the intro fly-by the player's kart is projected as a world
+     * sprite like any other (FUN_000255d4 includes it when the intro flag is
+     * set, and FUN_00026a3c's fixed-position draw returns early) */
+    int      pk_show, pk_x, pk_y, pk_compass, pk_char;
     /* other karts (static grid until AI lands) */
     int      kart_x[8], kart_y[8], kart_angle[8];
 };
@@ -214,6 +218,19 @@ int wscene_hit_object(void *ctx, int x, int y, int *ox, int *oy) {
 /* read-only probe used by projectiles: any live object within Manhattan 0xE.
  * Unlike the kart probe this does NOT mark the object as touched, so a
  * projectile flying past a crate cannot collect it (ProjProbe @13022). */
+/* show the player's kart as a world sprite (intro only); angle is its heading */
+void wscene_set_player_sprite(WScene *s, int show, int x, int y, int angle,
+                              int character) {
+    if (!s) return;
+    s->pk_show = show;
+    s->pk_x = x;
+    s->pk_y = y;
+    s->pk_char = character;
+    int oct = angle / 240;
+    if (angle % 240 > 0x77) oct++;
+    s->pk_compass = ((oct & 7) + 6) & 7;   /* same pre-remap as .RD compass */
+}
+
 /* start-light state (0/1 = red/amber, 2 = burst; off once the race is live) */
 void wscene_set_light(WScene *s, int frame, int on) {
     if (!s) return;
@@ -412,6 +429,22 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                 if (mode == 0) wai_set_view_frame(ai, k, frame);
                 e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;
             }
+            list[n++] = e;
+        }
+    }
+
+    /* player's kart as a world sprite (intro only) */
+    if (s->pk_show && cars_px && kart_inf) {
+        int cam_oct = p->angle / 240;
+        if (p->angle % 240 > 0x77) cam_oct++;
+        cam_oct &= 7;
+        DrawEnt e;
+        if (project(tb, p, s->pk_x, s->pk_y, &e)) {
+            int frame = (s->pk_compass - cam_oct + 6) & 7;
+            e.inf = kart_inf;
+            e.src_w = 38;
+            e.src_h = 28;
+            e.frame = cars_px + ((size_t)s->pk_char * 12 + frame) * 38 * 28;
             list[n++] = e;
         }
     }

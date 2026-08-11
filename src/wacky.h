@@ -237,6 +237,8 @@ int     wscene_hit_object(void *ctx, int x, int y, int *ox, int *oy);
 int     wscene_blocks(void *ctx, int x, int y);
 void    wscene_resolve_pickups(WScene *s, WPhys *p);
 void    wscene_set_light(WScene *s, int frame, int on);
+void    wscene_set_player_sprite(WScene *s, int show, int x, int y, int angle,
+                                 int character);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
                     WAi *ai, const WWeapons *weap);

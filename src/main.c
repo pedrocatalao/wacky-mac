@@ -127,6 +127,60 @@ static void draw_kart_raw(const uint8_t *frame, const uint8_t dac[768], int y_li
         }
 }
 
+/* ---- race-start sequence (FUN_0002fd8c @23157) ---- */
+enum StartPhase { START_SLIDE, START_SWING, START_LIGHT, RACING };
+static enum StartPhase phase = START_SLIDE;
+static int32_t start_x, start_y;
+static int light_tick;
+
+static void intro_arm(WPhys *p, WScene *scene, const WTrack *t, int kart_id) {
+    start_x = p->posx + 0x84;
+    start_y = p->posy;
+    p->posy += 0x84;
+    p->posx = 0x708;
+    p->angle = 0x3C0;
+    phase = START_SLIDE;
+    light_tick = 0;
+    if (scene) {
+        wscene_set_light(scene, 0, 1);
+        wscene_set_player_sprite(scene, 1, t->start_x[0], t->start_y[0],
+                                 0x1E0, kart_id);
+    }
+}
+
+/* one intro step; returns true while the intro still owns the tick */
+static bool intro_step(WPhys *p, const WTables *tb, WScene *scene) {
+    if (phase == RACING) return false;
+    switch (phase) {
+    case START_SLIDE:
+        p->posx -= 0x40;
+        if (p->posx <= start_x) { p->posx = start_x; phase = START_SWING; }
+        break;
+    case START_SWING:
+        wphys_pivot_turn(p, tb, 0x28, -1);
+        if (p->angle < 0x1E1) {
+            p->posx = start_x - 0x84;
+            p->posy = start_y;
+            p->angle = 0x1E0;
+            phase = START_LIGHT;
+        }
+        break;
+    default:
+        light_tick++;
+        if (light_tick >= 0x22) {
+            if (scene) {
+                wscene_set_light(scene, 2, 1);
+                wscene_set_player_sprite(scene, 0, 0, 0, 0, 0);
+            }
+            phase = RACING;
+        } else if (scene) {
+            wscene_set_light(scene, light_tick > 0x10 ? 1 : 0, 1);
+        }
+        break;
+    }
+    return true;
+}
+
 static void render_map_debug(const WTrack *t, const WPhys *p) {
     /* 4096 world / 20 ≈ full map fit; sample every 20.5 px */
     for (int y = 0; y < WW_SCREEN_H; y++)
@@ -200,12 +254,6 @@ int main(int argc, char **argv) {
     WPhys player;
     int cyc_cnt60 = 0, cyc_cnt50 = 0, cyc_ph_a = 0, cyc_ph_b = 0;
     int lap = 1, prev_prog = 0, wrong_way = 0;
-    /* race start (FUN_0002fd8c @23157): the camera is parked far to the side
-     * facing 0x3C0, slides in 0x40/frame, then swings round to 0x1E0 at
-     * 0x28/frame about the steering pivot; then the light counts down */
-    enum { START_SLIDE, START_SWING, START_LIGHT, RACING } phase = START_SLIDE;
-    int32_t start_x = 0, start_y = 0;
-    int light_tick = 0;
     int kart_id = 0;
     bool map_view = false;
     bool need_load = true, running = true;
@@ -231,26 +279,19 @@ int main(int argc, char **argv) {
             if (weap) wweap_reset(weap);
             wphys_reset(&player, &track);
             player.ammo = 4;     /* the original starts you with hedgehogs */
-            /* arm the intro fly-by */
-            start_x = player.posx + 0x84;
-            start_y = player.posy;
-            player.posy += 0x84;
-            player.posx = 0x708;
-            player.angle = 0x3C0;
-            phase = START_SLIDE;
-            light_tick = 0;
-            if (scene) wscene_set_light(scene, 0, 1);
+            intro_arm(&player, scene, &track, kart_id);
+
             /* headless pre-simulation for frame dumps: argv[4] = tick count */
             if (dump_path && argc > 4) {
                 int pre = atoi(argv[4]);
                 bool st = pre < 0;               /* negative = steer left */
                 if (st) pre = -pre;
                 WPhysInput in = { true, false, st, false, false };
-                if (st) steer_anim = 0;
                 WCollide pcol = { wscene_hit_object, wai_hit_kart, scene, ai };
                 for (int i = 0; i < pre; i++) {
+                    if (intro_step(&player, &TB, scene)) continue;
                     wphys_tick(&player, &track, &TB, &in, 1, &pcol);
-                    if (weap) {   /* fire once, then let it fly */
+                    if (weap) {
                         wweap_fire(weap, &player, &track, &TB, i == 0, i, NULL);
                         wweap_tick(weap, &track, &TB, &pcol, &player, i);
                     }
@@ -298,35 +339,7 @@ int main(int argc, char **argv) {
 
         bool ticked = false;
         while (acc_ms >= TICK_MS) {          /* authentic 11.34 Hz fixed step */
-            /* race-start sequence: physics is frozen until the light bursts */
-            if (phase != RACING) {
-                switch (phase) {
-                case START_SLIDE:
-                    player.posx -= 0x40;
-                    if (player.posx <= start_x) {
-                        player.posx = start_x;
-                        phase = START_SWING;
-                    }
-                    break;
-                case START_SWING:
-                    wphys_pivot_turn(&player, &TB, 0x28, -1);
-                    if (player.angle < 0x1E1) {
-                        player.posx = start_x - 0x84;
-                        player.posy = start_y;
-                        player.angle = 0x1E0;
-                        phase = START_LIGHT;
-                    }
-                    break;
-                default:                       /* START_LIGHT */
-                    light_tick++;
-                    if (light_tick >= 0x22) {
-                        if (scene) wscene_set_light(scene, 2, 1);   /* burst */
-                        phase = RACING;
-                    } else if (scene) {
-                        wscene_set_light(scene, light_tick > 0x10 ? 1 : 0, 1);
-                    }
-                    break;
-                }
+            if (intro_step(&player, &TB, scene)) {
                 acc_ms -= TICK_MS;
                 ticked = true;
                 continue;
@@ -422,8 +435,10 @@ int main(int argc, char **argv) {
                 /* 5-position steering animation (SPR_IDLE, anim state 5):
                  * 0,1 = char lean-left pair, 2 = CARS rear view,
                  * 3,4 = char lean-right pair; steps 1 frame/tick */
-                const uint8_t *kf;
-                if (player.spin_dir && cars_raw) {
+                const uint8_t *kf = NULL;
+                if (phase != RACING) {
+                    kf = NULL;      /* drawn as a world sprite during the intro */
+                } else if (player.spin_dir && cars_raw) {
                     /* spin-out: the 17-entry spin table cycles the kart's own
                      * rotation frames starting at 4 (built at character select,
                      * FUN_00016ca0 region) */
