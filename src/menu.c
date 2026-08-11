@@ -467,11 +467,11 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
          * +0x1E per frame; the logo band reveals on top; the MEANS ACTION
          * banner flies in (0x462 -> 0x8C, -100 per frame) and parks. The
          * original runs at 136/7 = 19.4 Hz - step every third frame. */
-        if (m->frame % 3 == 0) {
+        if (m->fade >= 32 && m->frame % 3 == 0) {
             if (m->ap_y > 0) {
-                m->ap_y -= 6;              /* reveal: 6 rows per frame */
+                m->ap_y -= 6;              /* band slides up 6 rows a frame */
                 if (m->ap_y < 0) m->ap_y = 0;
-                m->ap_py += 6;             /* forward drift while revealing */
+                m->ap_py += 6;             /* forward drift while sliding */
             } else if (m->tb) {
                 int32_t nd0 = m->tb->ndist[0];
                 int oa = m->ap_ang, na = (oa + 0x1E) % 1920;
@@ -493,6 +493,9 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
             }
         }
 
+        /* nothing moves until the fade-in has shown the full picture */
+        if (m->fade < 32) break;
+
         /* ground rows 130..199: the real column ray-caster over the tiled
          * image (one TRIG unit per column, NDIST distances per column) */
         if (m->tb && m->bg.pixels) {
@@ -511,9 +514,18 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
                 }
             }
         }
-        /* logo band above: rows [ap_y..130) revealed, black before that */
-        for (int y = 0; y < m->ap_y && y < 130; y++)
-            memset(fb + (size_t)y * WW_SCREEN_W, 0, WW_SCREEN_W * 4);
+        /* the logo band slides up into rows 0..130: screen row s shows
+         * image row 55+(s-ap_y) - the band that frames the earth and the
+         * whole logo (offset measured against the real intro; the rows
+         * above the band keep the faded-in picture until overtaken) */
+        if (m->bg.pixels)
+            for (int s = m->ap_y; s < 130; s++) {
+                const uint8_t *src =
+                    m->bg.pixels + (size_t)(55 + s - m->ap_y) * WW_SCREEN_W;
+                uint32_t *dst = fb + (size_t)s * WW_SCREEN_W;
+                for (int x = 0; x < WW_SCREEN_W; x++)
+                    dst[x] = rgba(m->bg.pal, src[x]);
+            }
 
         /* the banner (FUN_000343a0): bucket size from 251X6.INF, screen y
          * from the computed table y(d) = 120 + h/2, h = round(18000/d)
