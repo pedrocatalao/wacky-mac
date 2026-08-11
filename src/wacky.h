@@ -155,6 +155,10 @@ typedef struct {
     int     spin_frame;      /* index into the 17-entry spin table: 7->0 left,
                                 9->0x10 right; rotation frame = (4+i) & 7    */
     int     hop_turn_dir, hop_turn_cnt;   /* handbrake sharp turn             */
+    /* steering lean counters (kart +0x52/+0x54): ramp 0..4 while turning, 0x10
+     * during a hop-turn. They also drive the horizon scroll, in bytes of the
+     * 1280px panorama (4 px each), range 0..240 (FUN_00024834) */
+    int     lean_l, lean_r, sky_off;
     int     hop_state, hop_air, hop_height, hop_maxh;  /* ramp jumps          */
     int     turbo, turbo_timer;
     int     engine_state, engine_anim;   /* kart +0x62 / +0x54: exhaust anim */

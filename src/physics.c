@@ -231,8 +231,34 @@ static void player_move(const PhysCtx *c, WPhys *p) {
         p->throttle = 0;
         p->speed = 0;
     } else {
-        if (p->steer_l >= 1) steer_pivot(c, p, p->steer_l, -1);
-        if (p->steer_r >= 1) steer_pivot(c, p, p->steer_r, +1);
+        /* left: lean ramps 0..4 (0x10 while hop-turning) and scrolls the
+         * horizon panorama left by that many bytes (FUN_00024834) */
+        if (p->steer_l < 1) {
+            if (--p->lean_l < 0) p->lean_l = 0;
+        } else {
+            steer_pivot(c, p, p->steer_l, -1);
+            if (p->hop_turn_dir == 0) {
+                if (++p->lean_l > 4) p->lean_l = 4;
+            } else {
+                p->lean_l = 0x10;
+            }
+            if (p->sky_off == 0) p->sky_off = 160;   /* wrap at the low end */
+            p->sky_off -= p->lean_l;
+            if (p->sky_off < 0) p->sky_off = 0;
+        }
+        if (p->steer_r < 1) {
+            if (--p->lean_r < 0) p->lean_r = 0;
+        } else {
+            steer_pivot(c, p, p->steer_r, +1);
+            if (p->hop_turn_dir == 0) {
+                if (++p->lean_r > 4) p->lean_r = 4;
+            } else {
+                p->lean_r = 0x10;
+            }
+            if (p->sky_off == 240) p->sky_off = 80;  /* wrap at the high end */
+            p->sky_off += p->lean_r;
+            if (p->sky_off > 240) p->sky_off = 240;
+        }
         whisker_respond(c, p);
     }
 

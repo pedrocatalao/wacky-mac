@@ -53,25 +53,17 @@ static uint32_t pal_rgba(const uint8_t pal[768], uint8_t idx) {
            (uint32_t)pal[idx * 3 + 1] << 8 | pal[idx * 3];
 }
 
-static int sky_off = 0;     /* byte offset 0..240 into the panorama (4px units) */
-static int sky_vel = 0;
 
-static void render_view(const WTrack *t, const WPhys *p, bool left, bool right) {
+static void render_view(const WTrack *t, const WPhys *p) {
     /* rows 0..109: backdrop indices through the (possibly cycling) race palette */
     if (t->back)
         for (int i = 0; i < WW_SKY_Y0 * WW_SCREEN_W; i++)
             fb[i] = pal_rgba(t->dac, t->back[i]);
 
-    /* rows 110..129: N.PAR panorama window, velocity-scrolled (docs) */
-    if (left || right) {
-        if (sky_vel < 4) sky_vel++;
-        sky_off += (right ? sky_vel : -sky_vel);
-    } else {
-        sky_vel = 0;
-    }
-    if (sky_off < 0) sky_off += 160;         /* two copies of 640px in strip */
-    if (sky_off > 240) sky_off -= 160;
-    int px_off = sky_off * 4;
+    /* rows 110..129: N.PAR panorama window. The scroll offset is advanced by
+     * the physics tick (lean counters), not here, so it moves at the game's
+     * rate rather than the frame rate. 1 byte of offset = 4 pixels. */
+    int px_off = p->sky_off * 4;
     for (int y = 0; y < WW_SKY_ROWS; y++) {
         uint32_t *dst = fb + (size_t)(WW_SKY_Y0 + y) * WW_SCREEN_W;
         const uint8_t *src = t->par + (size_t)y * WW_PAR_W;
@@ -437,7 +429,7 @@ int main(int argc, char **argv) {
             if (map_view) {
                 render_map_debug(&track, &player);
             } else {
-                render_view(&track, &player, left, right);
+                render_view(&track, &player);
                 if (scene)
                     wscene_draw(fb, scene, &track, &TB, &player, cars_raw,
                                 kart_id, ai, weap);
