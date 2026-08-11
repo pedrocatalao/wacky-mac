@@ -357,6 +357,9 @@ int main(int argc, char **argv) {
         if (acc_ms >= TICK_MS && intro_step(&player, &TB, scene)) {
             acc_ms -= TICK_MS;
             ticked = true;
+            /* the original starts the motor loop at idle pitch (16000) at the
+             * top of the start sequence, so it hums through the countdown */
+            wsound_engine(1, 0);
         } else if (acc_ms >= TICK_MS) {
             WPhysInput in = { accel, brake, left, right, hop };
             WCollide col = { wscene_hit_object, wai_hit_kart, scene, ai };
