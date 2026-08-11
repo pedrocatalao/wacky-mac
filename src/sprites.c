@@ -376,8 +376,7 @@ static int cmp_far_first(const void *a, const void *b) {
 
 void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                  const WPhys *p, const uint8_t *cars_px, int player_kart,
-                 WAi *ai, const WWeapons *weap,
-                 const uint8_t *const char_px[8]) {
+                 WAi *ai, const WWeapons *weap) {
     DrawEnt list[MAX_INST + 8];
     int n = 0;
 
@@ -439,9 +438,17 @@ void wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                         e.bucket < 3 && s->rowtab[e.dist & 0xFFF] <= 192,
                         e.sx < 160 - 4 ? 2 : 0))
                     wsound_play(sprite);
+                /* player head-turn + the PASS whoosh: an opponent whose
+                 * baseline is level with or below the player's is right
+                 * beside him ([0xf] codes 3/2); left or centre -> look
+                 * left (position 1), right -> look right (position 3) */
+                if (mode == 0 && s->rowtab[e.dist & 0xFFF] >= 191 &&
+                    wai_player_look_try(ai, e.sx <= 160 + 4 ? 1 : 3))
+                    wsound_play(8);            /* PASS.VOC */
                 int lframe = mode == 0 ? wai_kart_look(ai, k) : -1;
-                if (lframe >= 0 && char_px && char_px[sprite]) {
-                    e.frame = char_px[sprite] + (size_t)lframe * 38 * 28;
+                if (lframe >= 0) {
+                    /* head-turn rear views live in CARS.SP frames 8..11 */
+                    e.frame = cars_px + ((size_t)sprite * 12 + lframe) * 38 * 28;
                 } else {
                     if (mode == 0) wai_set_view_frame(ai, k, frame);
                     e.frame = cars_px + ((size_t)sprite * 12 + frame) * 38 * 28;

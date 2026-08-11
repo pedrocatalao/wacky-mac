@@ -46,6 +46,9 @@ struct WAi {
 
     int top_idx;                  /* aiTopSpeedIdx */
     int rubber_margin;
+    /* player head-turn (the [0xf]==2/3 pass block): dir 1 = look left,
+     * 3 = look right, held for a moment then re-triggerable */
+    int plook_dir, plook_ticks;
 };
 
 static int bres_emit(WAi *ai, int x0, int y0, int x1, int y1) {
@@ -165,6 +168,7 @@ void wai_reset(WAi *ai, const WTrack *t, int class_id, int engine12,
 
 /* per tick: move karts 1..7; player progress passed for rubber banding */
 void wai_tick(WAi *ai, const WTables *tb, int32_t player_progress, int player_rank) {
+    if (ai->plook_ticks > 0) ai->plook_ticks--;
     for (int i = 1; i < 8; i++) {
         struct AiKart *k = &ai->k[i];
         if (k->look_ticks > 0) k->look_ticks--;
@@ -326,8 +330,8 @@ void wai_kart_ram(WAi *ai, int idx) {
 /* remember the frame the renderer chose, so a spin starts from it */
 /* passing gag state (arming: the per-viewer flag is set while the kart
  * shows its rear-view frame - the player is right behind it - and the
- * latch clears once the view angle changes, so the gag re-fires on every
- * overtake approach, not once per race) */
+ * latch clears once the look animation has played out, so the gag
+ * re-fires on every overtake approach, not once per race) */
 int wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base) {
     if (!ai || i < 1 || i > 7) return 0;
     struct AiKart *k = &ai->k[i];
@@ -339,9 +343,27 @@ int wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base) {
     return 1;
 }
 
+/* current head-turn frame within CARS.SP (frames 8..11 are the rear views
+ * with the head turned: left, hard left, right, hard right); the ticker
+ * rises to the hard frame, holds, and comes back (the [0x14] machine) */
 int wai_kart_look(const WAi *ai, int i) {
     if (!ai || i < 1 || i > 7 || ai->k[i].look_ticks <= 0) return -1;
-    return ai->k[i].look_base + ((ai->k[i].look_ticks >> 1) & 1);
+    int t = ai->k[i].look_ticks;
+    int step = (t > 0x11 || t <= 3) ? 0 : 1;
+    return 8 + ai->k[i].look_base + step;
+}
+
+/* player head-turn: triggered when an opponent is level with or closer
+ * than the player; refuses while one is already running */
+int wai_player_look_try(WAi *ai, int dir) {
+    if (!ai || ai->plook_ticks > 0) return 0;
+    ai->plook_dir = dir;
+    ai->plook_ticks = 0x14;
+    return 1;
+}
+
+int wai_player_look(const WAi *ai) {
+    return ai && ai->plook_ticks > 0 ? ai->plook_dir : 0;
 }
 
 void wai_set_view_frame(WAi *ai, int i, int frame) {

@@ -583,7 +583,7 @@ int main(int argc, char **argv) {
                 render_view(&track, &player);
                 if (scene)
                     wscene_draw(fb, scene, &track, &TB, &player, cars_raw,
-                                kart_id, ai, weap, char_raw);
+                                kart_id, ai, weap);
                 /* 5-position steering animation (SPR_IDLE, anim state 5):
                  * 0,1 = char lean-left pair, 2 = CARS rear view,
                  * 3,4 = char lean-right pair; steps 1 frame/tick */
@@ -597,8 +597,16 @@ int main(int argc, char **argv) {
                     int rot = (4 + player.spin_frame) & 7;
                     kf = cars_raw + ((size_t)kart_id * 12 + rot) * KART_W * KART_H;
                 } else if (steer_anim == 2 || !char_raw[kart_id]) {
-                    kf = cars_raw ? cars_raw + ((size_t)kart_id * 12 + 4) * KART_W * KART_H
-                                  : NULL;
+                    /* head-turn toward a passing opponent: the pass block
+                     * sets steering position 1 (left) or 3 (right), which
+                     * is the character's lean frame, while driving straight */
+                    int pl = ai ? wai_player_look(ai) : 0;
+                    if (pl && char_raw[kart_id])
+                        kf = char_raw[kart_id] +
+                             (size_t)(pl == 1 ? 0 : 2) * KART_W * KART_H;
+                    else
+                        kf = cars_raw ? cars_raw + ((size_t)kart_id * 12 + 4) * KART_W * KART_H
+                                      : NULL;
                 } else {
                     int extra = steer_anim < 2 ? steer_anim : steer_anim - 1;
                     kf = char_raw[kart_id] + (size_t)extra * KART_W * KART_H;

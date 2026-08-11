@@ -222,6 +222,8 @@ int  wai_kart_render(WAi *ai, int i, int *x, int *y, int *compass, int *frame);
 void wai_set_view_frame(WAi *ai, int i, int frame);
 int  wai_kart_pass_check(WAi *ai, int i, int rear, int close_ok, int base);
 int  wai_kart_look(const WAi *ai, int i);
+int  wai_player_look_try(WAi *ai, int dir);
+int  wai_player_look(const WAi *ai);
 
 /* ---- Weapons / projectiles (src/weapons.c) ---- */
 
@@ -250,8 +252,7 @@ void    wscene_set_player_sprite(WScene *s, int show, int x, int y, int angle,
                                  int character);
 void    wscene_draw(uint32_t *fb, WScene *s, const WTrack *t, const WTables *tb,
                     const WPhys *p, const uint8_t *cars_px, int player_kart,
-                    WAi *ai, const WWeapons *weap,
-                    const uint8_t *const char_px[8]);
+                    WAi *ai, const WWeapons *weap);
 
 /* ---- Sound effects (src/sound.c) ----
  * ids are the game's own (table of 12-byte name slots in WW.EXE data) */
