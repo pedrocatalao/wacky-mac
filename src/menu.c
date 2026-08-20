@@ -469,9 +469,9 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
          * original runs at 136/7 = 19.4 Hz - step every third frame. */
         if (m->fade >= 32 && m->frame % 3 == 0) {
             if (m->ap_y > 0) {
-                m->ap_y -= 6;              /* band slides up 6 rows a frame */
+                m->ap_y -= 6;              /* opening phase: forward drift */
                 if (m->ap_y < 0) m->ap_y = 0;
-                m->ap_py += 6;             /* forward drift while sliding */
+                m->ap_py += 6;
             } else if (m->tb) {
                 int32_t nd0 = m->tb->ndist[0];
                 int oa = m->ap_ang, na = (oa + 0x1E) % 1920;
@@ -493,8 +493,10 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
             }
         }
 
-        /* nothing moves until the fade-in has shown the full picture */
-        if (m->fade < 32) break;
+        /* the whole composed screen fades in together */
+        uint8_t fpal[768];
+        for (int i = 0; i < 768; i++)
+            fpal[i] = (uint8_t)(m->bg.pal[i] * m->fade / 32);
 
         /* ground rows 130..199: the real column ray-caster over the tiled
          * image (one TRIG unit per column, NDIST distances per column) */
@@ -510,21 +512,20 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
                     int tx = ((wx >> 5) % 10) * 32 + (wx & 31);
                     int ty = ((wy >> 5) % 6) * 32 + (wy & 31);
                     fb[(size_t)(WW_SCREEN_H - 1 - k) * WW_SCREEN_W + col] =
-                        rgba(m->bg.pal, m->bg.pixels[ty * WW_SCREEN_W + tx]);
+                        rgba(fpal, m->bg.pixels[ty * WW_SCREEN_W + tx]);
                 }
             }
         }
-        /* the logo band slides up into rows 0..130: screen row s shows
-         * image row 55+(s-ap_y) - the band that frames the earth and the
-         * whole logo (offset measured against the real intro; the rows
-         * above the band keep the faded-in picture until overtaken) */
+        /* the logo band sits in place from the start: rows 0..129 show
+         * image rows 55..184 (offset measured against the real intro) -
+         * no sliding copy, the original keeps the backdrop static */
         if (m->bg.pixels)
-            for (int s = m->ap_y; s < 130; s++) {
+            for (int s = 0; s < 130; s++) {
                 const uint8_t *src =
-                    m->bg.pixels + (size_t)(55 + s - m->ap_y) * WW_SCREEN_W;
+                    m->bg.pixels + (size_t)(55 + s) * WW_SCREEN_W;
                 uint32_t *dst = fb + (size_t)s * WW_SCREEN_W;
                 for (int x = 0; x < WW_SCREEN_W; x++)
-                    dst[x] = rgba(m->bg.pal, src[x]);
+                    dst[x] = rgba(fpal, src[x]);
             }
 
         /* the banner (FUN_000343a0): bucket size from 251X6.INF, screen y
@@ -550,7 +551,7 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
                     int sx = 133 - w / 2 + c, sy = ty + r;
                     if (sx < 0 || sx >= WW_SCREEN_W || sy < 0 || sy >= WW_SCREEN_H)
                         continue;
-                    fb[sy * WW_SCREEN_W + sx] = rgba(m->bg.pal, p);
+                    fb[sy * WW_SCREEN_W + sx] = rgba(fpal, p);
                 }
         }
         /* leave when the fanfare finishes, like the original */
