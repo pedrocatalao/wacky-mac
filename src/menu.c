@@ -619,7 +619,7 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
                     if (m->tp_pos[k] > 0x3E8) m->tp_state[k] = 2;
                 }
                 if (m->tp_lead < 7 && m->tp_state[m->tp_lead + 1] == 0 &&
-                    m->tp_pos[m->tp_lead] >= 0x190) {
+                    m->tp_pos[m->tp_lead] - m->tp_pos[m->tp_lead + 1] >= 0x190) {
                     m->tp_lead++;
                     m->tp_state[m->tp_lead] = 1;
                     wsound_play(8);    /* PASS.VOC per launch */
