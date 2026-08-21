@@ -70,6 +70,16 @@ struct WMenu {
     int ap_flying;
     int ap_dist;            /* banner distance 0x462 -> 0x8C */
     int ap_alt;             /* banner altitude 0x3C -> 0 */
+    /* title-screen kart parade (FUN_00034208 + the loop at 0x35077): each
+     * kart appears centred showing its rear view and drives away through
+     * the gate, distance 0x3C -> 0x3E8 at 0x1C per 17 Hz frame; the next
+     * kart launches when the previous is 0x190 ahead, PASS on launch */
+    int kb_w[10], kb_h[10]; /* 38X28.INF scale bucket sizes */
+    int tp_state[8];        /* 0 waiting, 1 driving, 2 through the gate */
+    int tp_pos[8];
+    int tp_lead;            /* index of the last launched kart */
+    int tp_hold;            /* 0x3C-tick hold before the parade */
+    int tp_acc;             /* 17 Hz step accumulator */
 };
 
 /* the original keeps a song playing across related screens; only start a
@@ -250,6 +260,14 @@ static void enter(WMenu *m, int state) {
     case FL_TITLE:
         load_bg(m, "WINTRO.PCX");
         menu_music(m, "MAINMENU", 1);
+        for (int k = 0; k < 8; k++) {
+            m->tp_state[k] = 0;
+            m->tp_pos[k] = 0x3C;
+        }
+        m->tp_state[0] = 1;            /* pole kart leads the parade */
+        m->tp_lead = 0;
+        m->tp_hold = 26;               /* 0x3C ticks of the 136 Hz clock */
+        m->tp_acc = 0;
         break;
     case FL_MAIN:
     case FL_CLASS:
@@ -314,6 +332,19 @@ WMenu *wmenu_create(const WDat *dat, const WTables *tb) {
             int w = inf[p] | inf[p + 1] << 8, h = inf[p + 2] | inf[p + 3] << 8;
             m->ap_bw[b] = w;
             m->ap_bh[b] = h;
+            p += 4 + (uint32_t)(h + 1) * w * 4;
+        }
+    }
+    /* kart scale buckets from 38X28.INF, for the title parade */
+    {
+        uint32_t len;
+        const uint8_t *inf = wdat_find(dat, "38X28.INF", &len);
+        uint32_t p = 0;
+        for (int b = 0; b < 10; b++) {
+            if (!inf || p + 4 > len) { m->kb_w[b] = 38; m->kb_h[b] = 28; continue; }
+            int w = inf[p] | inf[p + 1] << 8, h = inf[p + 2] | inf[p + 3] << 8;
+            m->kb_w[b] = w;
+            m->kb_h[b] = h;
             p += 4 + (uint32_t)(h + 1) * w * 4;
         }
     }
@@ -571,10 +602,61 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
         /* 0x110 ticks of the 136 Hz clock (FUN_000347b4) */
         if (m->frame > 120) enter(m, FL_TITLE);
         break;
-    case FL_TITLE:
+    case FL_TITLE: {
+        /* kart parade (FUN_00034208 + the loop at 0x35077): after a short
+         * hold each kart drives away through the gate, rear view centred,
+         * 0x1C per frame at 136/8 = 17 Hz; the next kart launches with the
+         * PASS whoosh when the leader is 0x190 ahead */
+        if (m->fade >= 32 && m->tp_hold > 0 && --m->tp_hold == 0)
+            wsound_play(8);            /* the parade opens with the whoosh */
+        if (m->fade >= 32 && m->tp_hold == 0) {
+            m->tp_acc += 17;
+            while (m->tp_acc >= 60) {
+                m->tp_acc -= 60;
+                for (int k = 0; k < 8; k++) {
+                    if (m->tp_state[k] != 1) continue;
+                    m->tp_pos[k] += 0x1C;
+                    if (m->tp_pos[k] > 0x3E8) m->tp_state[k] = 2;
+                }
+                if (m->tp_lead < 7 && m->tp_state[m->tp_lead + 1] == 0 &&
+                    m->tp_pos[m->tp_lead] >= 0x190) {
+                    m->tp_lead++;
+                    m->tp_state[m->tp_lead] = 1;
+                    wsound_play(8);    /* PASS.VOC per launch */
+                }
+            }
+        }
+        /* draw farthest first; each kart shows its own rear view (CARS
+         * frame 4), scaled by the 38X28.INF bucket for its distance and
+         * placed by the y(d) = 120 + h/2 table, clipped at row 199 */
+        if (m->cars)
+            for (int k = 0; k < 8; k++) {
+                if (m->tp_state[k] != 1) continue;
+                int d = m->tp_pos[k];
+                int b = (d - 0x7C) / 0x46;
+                if (b < 0) b = 0;
+                if (b > 9) b = 9;
+                int w = m->kb_w[b], h = m->kb_h[b];
+                int hh = (18000 + d / 2) / d;
+                if (hh < 0x15) hh = 0x15;
+                if (hh > 0xF0) hh = 0xF0;
+                int ty = 0x78 - hh / 2 + hh - h;
+                if (ty > 0xC7) continue;
+                const uint8_t *px = m->cars + ((size_t)k * 12 + 4) * 38 * 28;
+                for (int c = 0; c < w; c++)
+                    for (int r = 0; r < h; r++) {
+                        uint8_t pix = px[(size_t)(c * 38 / w) * 28 + r * 28 / h];
+                        if (!pix) continue;
+                        int sx = 160 - w / 2 + c, sy = ty + r;
+                        if (sx < 0 || sx >= WW_SCREEN_W || sy < 0 || sy > 0xC7)
+                            continue;
+                        fb[sy * WW_SCREEN_W + sx] = rgba(m->bg.pal, pix);
+                    }
+            }
         if ((m->frame / 30) & 1)
             wtext_c(m, fb, "PRESS FIRE", 180, 1);
         break;
+    }
     case FL_MAIN:
         menu_list(m, fb, "WACKY WHEELS", MAIN_ITEMS, 6);
         break;
