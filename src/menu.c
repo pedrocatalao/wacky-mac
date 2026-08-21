@@ -468,10 +468,13 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
          * banner flies in (0x462 -> 0x8C, -100 per frame) and parks. The
          * original runs at 136/7 = 19.4 Hz - step every third frame. */
         if (m->fade >= 32 && m->frame % 3 == 0) {
-            if (m->ap_y > 0) {
-                m->ap_y -= 6;              /* band rises 6 rows a frame */
-                if (m->ap_y < 0) m->ap_y = 0;
-                m->ap_py += 6;             /* forward drift while rising */
+            if (m->ap_y > -60) {
+                /* band rises 6 rows a frame; the forward glide carries on
+                 * about ten frames past the band parking before the circle
+                 * begins (matched by eye against the original - the loop's
+                 * exact hold constant is lost to a register clobber) */
+                m->ap_y -= 6;
+                m->ap_py += 6;
             } else if (m->tb) {
                 int32_t nd0 = m->tb->ndist[0];
                 int oa = m->ap_ang, na = (oa + 0x1E) % 1920;
@@ -517,18 +520,21 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
             }
         }
         /* the logo band rises out of the seam into rows 0..129: screen
-         * row s shows image row 55+(s-ap_y); above the band is plain
+         * row s shows image row 55+(s-band_top); above the band is plain
          * black - there is no static backdrop behind it */
-        for (int s = 0; s < m->ap_y && s < 130; s++)
-            memset(fb + (size_t)s * WW_SCREEN_W, 0, WW_SCREEN_W * 4);
-        if (m->bg.pixels)
-            for (int s = m->ap_y; s < 130; s++) {
-                const uint8_t *src =
-                    m->bg.pixels + (size_t)(55 + s - m->ap_y) * WW_SCREEN_W;
-                uint32_t *dst = fb + (size_t)s * WW_SCREEN_W;
-                for (int x = 0; x < WW_SCREEN_W; x++)
-                    dst[x] = rgba(fpal, src[x]);
-            }
+        {
+            int band_top = m->ap_y > 0 ? m->ap_y : 0;
+            for (int s = 0; s < band_top && s < 130; s++)
+                memset(fb + (size_t)s * WW_SCREEN_W, 0, WW_SCREEN_W * 4);
+            if (m->bg.pixels)
+                for (int s = band_top; s < 130; s++) {
+                    const uint8_t *src =
+                        m->bg.pixels + (size_t)(55 + s - band_top) * WW_SCREEN_W;
+                    uint32_t *dst = fb + (size_t)s * WW_SCREEN_W;
+                    for (int x = 0; x < WW_SCREEN_W; x++)
+                        dst[x] = rgba(fpal, src[x]);
+                }
+        }
 
         /* the banner (FUN_000343a0): bucket size from 251X6.INF, screen y
          * from the computed table y(d) = 120 + h/2, h = round(18000/d)
