@@ -79,7 +79,7 @@ struct WMenu {
     int tp_pos[8];
     int tp_lead;            /* index of the last launched kart */
     int tp_hold;            /* 0x3C-tick hold before the parade */
-    int tp_acc;             /* 17 Hz step accumulator */
+    int tp_acc;             /* 136/9 Hz step accumulator */
 };
 
 /* the original keeps a song playing across related screens; only start a
@@ -605,14 +605,16 @@ void wmenu_frame(WMenu *m, uint32_t *fb) {
     case FL_TITLE: {
         /* kart parade (FUN_00034208 + the loop at 0x35077): after a short
          * hold each kart drives away through the gate, rear view centred,
-         * 0x1C per frame at 136/8 = 17 Hz; the next kart launches with the
-         * PASS whoosh when the leader is 0x190 ahead */
+         * 0x1C per frame at 136/9 = 15.1 Hz; the next kart launches with
+         * the PASS whoosh when the gap reaches 0x190 */
         if (m->fade >= 32 && m->tp_hold > 0 && --m->tp_hold == 0)
             wsound_play(8);            /* the parade opens with the whoosh */
         if (m->fade >= 32 && m->tp_hold == 0) {
-            m->tp_acc += 17;
-            while (m->tp_acc >= 60) {
-                m->tp_acc -= 60;
+            /* the parade loop waits until the 136 Hz delta exceeds 8, so
+             * its frame is 9 ticks = 15.1 Hz */
+            m->tp_acc += 136;
+            while (m->tp_acc >= 540) {
+                m->tp_acc -= 540;
                 for (int k = 0; k < 8; k++) {
                     if (m->tp_state[k] != 1) continue;
                     m->tp_pos[k] += 0x1C;
